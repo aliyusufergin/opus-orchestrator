@@ -443,7 +443,7 @@ def codex_command(
     ]
 
 
-def parse_timeout(minutes: float) -> float:
+def check_timeout(minutes: float) -> float:
     if not 0 < minutes <= MAX_TIMEOUT_MINUTES:
         raise WrapperError(
             f"timeout {minutes:g} minutes is refused: give more than 0 and at most {MAX_TIMEOUT_MINUTES}",
@@ -454,7 +454,7 @@ def parse_timeout(minutes: float) -> float:
 
 def delegate(args: argparse.Namespace) -> int:
     write_scope = parse_write_scope(args.write_scope)
-    timeout_minutes = parse_timeout(args.timeout)
+    timeout_minutes = check_timeout(args.timeout)
     if write_scope is None and args.check:
         raise WrapperError(
             "Checks are rerun only for a writing Delegation; a read-only one changes nothing to check",
@@ -482,7 +482,7 @@ def delegate(args: argparse.Namespace) -> int:
         command = codex_command(args, None, toplevel, last_message)
         exit_code = run_codex(command, contract, toplevel, events_path, timeout)
         changes = dict.fromkeys(("snapshot", "diff", "changed_paths", "outside_write_scope"))
-        checks = None
+        check_reruns = None
     else:
         snapshot = take_snapshot(toplevel)
         with snapshot_worktree(toplevel, snapshot, f"{args.run}-{delegation_id}") as worktree:
@@ -490,17 +490,17 @@ def delegate(args: argparse.Namespace) -> int:
             exit_code = run_codex(command, contract, worktree, events_path, timeout)
             # After the diff is taken, so that what a Check builds stays out of it.
             changes = collect_changes(worktree, snapshot, write_scope, delegation_dir)
-            checks = rerun_checks(args.check, worktree, delegation_dir, timeout)
+            check_reruns = rerun_checks(args.check, worktree, delegation_dir, timeout)
     duration = time.monotonic() - started
 
     thread_id, usage, errors = read_events(events_path)
     result, result_problem = read_result(last_message)
+    failure_kind, failure_message = None, None
     failure = classify_failure(exit_code, timeout_minutes, errors, result_problem)
-    failure_kind, failure_message = failure or (None, None)
-    if failure is not None:
+    if failure is not None or result is None:
+        failure_kind, failure_message = failure or ("invalid_result", str(result_problem))
         # The Delegate's own message stays in last-message.txt.
-        result = wrapper_result(*failure, changes["changed_paths"])
-    assert result is not None  # A Result that isn't valid is a failure.
+        result = wrapper_result(failure_kind, failure_message, changes["changed_paths"])
     evidence = {
         "run_id": args.run,
         "delegation_id": delegation_id,
@@ -517,7 +517,7 @@ def delegate(args: argparse.Namespace) -> int:
         "failure_kind": failure_kind,
         "failure": failure_message,
         **changes,
-        "checks": checks,
+        "check_reruns": check_reruns,
     }
     result_path = delegation_dir / "result.json"
     write_json(result_path, result)
@@ -590,6 +590,8 @@ def classify_failure(
     """The failure kind and its message, or None for a Delegation that went as it should."""
     if exit_code is None:
         return "timeout", f"Codex was stopped after the {timeout_minutes:g}-minute timeout"
+    if exit_code == 0 and not result_problem:
+        return None  # Codex got past any error it reported, such as one it retried.
     for kind, texts in CODEX_ERROR_TEXTS.items():
         for error in errors:
             if any(text in error for text in texts):
@@ -607,16 +609,18 @@ def rerun_checks(
 ) -> list[dict[str, Any]]:
     """Run each Check in the worktree, whatever the Delegate claimed.
 
-    The evidence keeps each Check's output tail; the whole output goes to the Run record.
+    The Checks share one `timeout` in seconds; an exit code of None means a Check ran past what
+    was left of it. The evidence keeps each Check's output tail; the whole output goes to the
+    Run record.
     """
+    deadline = time.monotonic() + timeout
     reruns = []
     for number, command in enumerate(checks, start=1):
         log = delegation_dir / f"check-{number}.log"
         with open(log, "wb") as output:
-            # Each Check gets the Delegation's timeout; an exit code of None means it ran past it.
             exit_code = run_process_group(
                 ["/bin/sh", "-c", command],
-                timeout,
+                max(deadline - time.monotonic(), 0),
                 cwd=worktree,
                 input=None,
                 stdout=output,
@@ -793,7 +797,7 @@ def print_summary(result_path: Path, result: dict[str, Any], evidence: dict[str,
         print(f"Diff: {evidence['diff']}")
         print(f"Changed paths: {len(evidence['changed_paths'])}")
         print(f"Outside Write scope: {', '.join(evidence['outside_write_scope']) or 'none'}")
-        print(f"Checks: {describe_checks(evidence['checks'])}")
+        print(f"Checks: {describe_checks(evidence['check_reruns'])}")
     print(f"Summary: {summary}")
 
 

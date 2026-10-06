@@ -57,19 +57,26 @@ class TimeoutTest(WritingDelegationTestCase):
             )
         )
 
-        [check] = evidence["checks"]
+        [check] = evidence["check_reruns"]
         self.assertEqual(check["exit_code"], 0)
 
-    def test_a_check_that_runs_past_the_timeout_is_stopped(self) -> None:
+    def test_the_checks_share_one_timeout(self) -> None:
         run_id, _ = self.start_run()
 
         completed = self.delegate(
-            run_id, write_scope=["src/"], scenario="write-done", timeout=SHORT_TIMEOUT, checks=["sleep 60"]
+            run_id,
+            write_scope=["src/"],
+            scenario="write-done",
+            timeout=SHORT_TIMEOUT,
+            checks=["sleep 60", "sleep 60", "true"],
         )
 
-        [check] = self.evidence(completed)["checks"]
-        self.assertIsNone(check["exit_code"])
-        self.assertEqual(stdout_field(completed.stdout, "Checks"), "1 of 1 failed: sleep 60")
+        evidence = self.evidence(completed)
+        self.assertEqual([check["exit_code"] for check in evidence["check_reruns"]], [None, None, None])
+        self.assertLess(evidence["duration_seconds"], 10)
+        self.assertEqual(
+            stdout_field(completed.stdout, "Checks"), "3 of 3 failed: sleep 60; sleep 60; true"
+        )
 
     def test_ends_the_codex_process_on_timeout(self) -> None:
         run_id, _ = self.start_run()

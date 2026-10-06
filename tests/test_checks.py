@@ -24,7 +24,7 @@ class CheckRerunTest(WritingDelegationTestCase):
         result = json.loads(Path(stdout_field(completed.stdout, "Result")).read_text())
         self.assertEqual(result["status"], "done", "the Delegate's own claim is kept as it made it")
         self.assertIsNone(result["checks"])
-        passed, failed = evidence["checks"]
+        passed, failed = evidence["check_reruns"]
         self.assertEqual(passed["command"], PASSING_CHECK)
         self.assertEqual(passed["exit_code"], 0)
         self.assertEqual(failed["command"], FAILING_CHECK)
@@ -39,7 +39,7 @@ class CheckRerunTest(WritingDelegationTestCase):
             self.delegate(run_id, write_scope=["src/"], scenario="write-done", checks=["pwd; ls src"])
         )
 
-        [check] = evidence["checks"]
+        [check] = evidence["check_reruns"]
         self.assertEqual(check["output_tail"], f"{self.only_codex_call().cwd}\nfarewell.py\ngreet.py\n")
 
     def test_keeps_only_the_tail_of_a_long_output(self) -> None:
@@ -49,7 +49,7 @@ class CheckRerunTest(WritingDelegationTestCase):
             self.delegate(run_id, write_scope=["src/"], scenario="write-done", checks=["seq 1000"])
         )
 
-        tail = evidence["checks"][0]["output_tail"]
+        tail = evidence["check_reruns"][0]["output_tail"]
         self.assertTrue(tail.endswith("999\n1000\n"), tail)
         self.assertNotIn("\n1\n", f"\n{tail}")
         self.assertLess(len(tail), 1000)
@@ -70,7 +70,7 @@ class CheckRerunTest(WritingDelegationTestCase):
 
         completed = self.delegate(run_id, write_scope=["src/"], scenario="write-done")
 
-        self.assertEqual(self.evidence(completed)["checks"], [])
+        self.assertEqual(self.evidence(completed)["check_reruns"], [])
         self.assertEqual(stdout_field(completed.stdout, "Checks"), "none given")
 
     def test_says_when_every_check_passed(self) -> None:

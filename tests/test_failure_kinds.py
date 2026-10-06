@@ -135,3 +135,20 @@ class InvalidResultTest(FailureKindTestCase):
 
         kept = Path(stdout_field(completed.stdout, "Result")).parent / "last-message.txt"
         self.assertEqual(kept.read_text(), message)
+
+
+class RetriedErrorTest(FailureKindTestCase):
+    def test_an_error_codex_got_past_doesnt_override_a_good_result(self) -> None:
+        quota = next(entry["message"] for entry in ERROR_MESSAGES if entry["kind"] == "quota_exhausted")
+        done = (DONE / "events.jsonl").read_text().splitlines()
+        events = [json.loads(line) for line in done]
+        scenario = self.scenario(
+            "retried",
+            events=[*events[:2], {"type": "error", "message": quota}, *events[2:]],
+            last_message=(DONE / "last-message.json").read_text(),
+        )
+
+        _, result, evidence = self.failed_delegation(scenario)
+
+        self.assertIsNone(evidence["failure_kind"])
+        self.assertEqual(result["status"], "done")
