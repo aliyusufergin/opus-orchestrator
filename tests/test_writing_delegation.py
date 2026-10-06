@@ -181,8 +181,7 @@ class CleanupTest(WritingDelegationTestCase):
 
         completed = self.delegate(run_id, write_scope=["src/"], scenario="write-no-result")
 
-        self.assertNotEqual(completed.returncode, 0)
-        self.assertIn("no Result", completed.stderr)
+        self.assertEqual(self.evidence(completed)["failure_kind"], "codex_error")
         self.assertFalse(Path(self.only_codex_call().cwd).exists())
         self.assertEqual(self.worktrees(), [])
         self.assertEqual(self.files(), files)

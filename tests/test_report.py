@@ -131,8 +131,8 @@ class RunReportTest(ReportTestCase):
 
     def test_shows_a_delegation_that_left_no_evidence(self) -> None:
         run_id, record = self.start_run()
-        self.assertNotEqual(self.delegate(run_id, "gpt-6.1-sol", "medium", "no-result").returncode, 0)
-        [delegation_dir] = (record / "delegations").iterdir()
+        delegation_dir = record / "delegations" / self.delegation(run_id, "gpt-6.1-sol", "medium")
+        (delegation_dir / "evidence.json").unlink()  # As while it is still running.
 
         line = delegation_line(self.report_stdout(run_id), delegation_dir.name)
 
