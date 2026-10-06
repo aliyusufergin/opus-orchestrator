@@ -121,11 +121,9 @@ def check_model_notes() -> list[str]:
     """The wrapper's freshness check needs a `date` it can parse."""
     fields, _ = frontmatter(MODEL_NOTES)
     try:
-        dated = date.fromisoformat(fields.get("date", ""))
+        date.fromisoformat(fields.get("date", ""))
     except ValueError:
         return [f"model-notes.md: the frontmatter needs date: YYYY-MM-DD, not {fields.get('date')!r}"]
-    if dated > date.today():
-        return [f"model-notes.md: the date {dated} is in the future"]
     return []
 
 

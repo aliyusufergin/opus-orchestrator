@@ -12,10 +12,10 @@ import argparse
 import itertools
 import json
 import os
+import re
 import secrets
 import subprocess
 import sys
-import re
 import time
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -33,7 +33,7 @@ MODEL_NOTES_ENV = "OPUS_ORCHESTRATOR_MODEL_NOTES"
 
 # Older notes may no longer match the catalog or the models' measured strengths.
 MODEL_NOTES_MAX_AGE_DAYS = 30
-# `ultra` is xhigh plus automatic subagent delegation, which Delegates never get (ADR 0006).
+# `ultra` is xhigh plus automatic subagent delegation, which Delegates never get (ADR 0001).
 REFUSED_EFFORTS = {"ultra"}
 
 # Run records live in the repository's Git directory, so they are never tracked.
@@ -153,10 +153,10 @@ def model_notes_warnings(notes: Path, dated: str | None, today: date) -> list[st
     try:
         age = (today - date.fromisoformat(dated or "")).days
     except ValueError:
-        return [f"the Model notes ({notes}) have no `date: YYYY-MM-DD` line; treat them as stale."]
+        return [f"the Model notes ({notes}) have no `date: YYYY-MM-DD` line; treat them as stale"]
     if age > MODEL_NOTES_MAX_AGE_DAYS:
         return [
-            f"the Model notes are {age} days old (dated {dated}); their routing guidance may be stale."
+            f"the Model notes are {age} days old (dated {dated}); their routing guidance may be stale"
         ]
     return []
 
@@ -184,7 +184,7 @@ def print_models(cwd: Path) -> None:
         if uncovered:
             warnings.append(
                 f"the Model notes don't cover {', '.join(uncovered)}; "
-                "route by the catalog's description until they do."
+                "route by the catalog's description until they do"
             )
     for warning in warnings:
         print(f"Warning: {warning}")

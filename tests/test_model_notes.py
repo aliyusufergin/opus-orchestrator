@@ -4,12 +4,13 @@ with Codex's live catalog, and `delegate` refuses `ultra` and unknown models."""
 from __future__ import annotations
 
 from datetime import date, timedelta
+import subprocess
 from pathlib import Path
 
-from support import PLUGIN_ROOT, WrapperTestCase, stdout_field
+from support import FAKE_CODEX, PLUGIN_ROOT, WrapperTestCase, stdout_field
 
 # The listed (not hidden) models in the recorded catalog.
-LISTED_MODELS = [
+LISTED_MODELS = (
     "gpt-6.1-sol",
     "gpt-6-astra",
     "gpt-6-sol",
@@ -17,11 +18,11 @@ LISTED_MODELS = [
     "gpt-5.6-sol",
     "gpt-5.6-terra",
     "gpt-5.6-luna",
-]
+)
 
 
 class ModelNotesTestCase(WrapperTestCase):
-    def write_model_notes(self, dated: date | str, models: list[str] = LISTED_MODELS) -> Path:
+    def write_model_notes(self, dated: date | str, models: tuple[str, ...] = LISTED_MODELS) -> Path:
         rows = "\n".join(f"| `{model}` | medium | – |" for model in models)
         notes = self.tmp / "model-notes.md"
         notes.write_text(
@@ -42,7 +43,7 @@ class StartRunCatalogTest(ModelNotesTestCase):
         completed = self.run_wrapper("start-run", model_notes=notes)
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
-        self.assertEqual(stdout_field(completed.stdout, "Models").split(", "), LISTED_MODELS)
+        self.assertEqual(stdout_field(completed.stdout, "Models").split(", "), list(LISTED_MODELS))
         self.assertIn(str(notes), stdout_field(completed.stdout, "Model notes"))
         self.assertIn(str(date.today()), stdout_field(completed.stdout, "Model notes"))
         self.assertEqual(self.warnings(completed.stdout), [])
@@ -132,7 +133,14 @@ class StartRunCatalogTest(ModelNotesTestCase):
 
 
 class DelegateModelGuardrailTest(ModelNotesTestCase):
-    def delegate(self, run_id: str, model: str, effort: str, catalog: str = "recorded"):
+    def delegate(
+        self,
+        run_id: str,
+        model: str,
+        effort: str,
+        catalog: str = "recorded",
+        codex: Path = FAKE_CODEX,
+    ) -> subprocess.CompletedProcess[str]:
         return self.run_wrapper(
             "delegate",
             "--run", run_id,
@@ -141,6 +149,7 @@ class DelegateModelGuardrailTest(ModelNotesTestCase):
             "--effort", effort,
             "--write-scope", "none",
             catalog=catalog,
+            codex=codex,
         )
 
     def test_refuses_ultra_without_running_a_delegate(self) -> None:
@@ -186,15 +195,7 @@ class DelegateModelGuardrailTest(ModelNotesTestCase):
     def test_fails_when_the_catalog_cannot_be_read(self) -> None:
         run_id, _ = self.start_run()
 
-        completed = self.run_wrapper(
-            "delegate",
-            "--run", run_id,
-            "--task", str(self.write_task("# Goal\nSummarise README.md.\n")),
-            "--model", "gpt-6-luna",
-            "--effort", "medium",
-            "--write-scope", "none",
-            codex=self.tmp / "no-codex-here",
-        )
+        completed = self.delegate(run_id, "gpt-6-luna", "medium", codex=self.tmp / "no-codex-here")
 
         self.assertNotEqual(completed.returncode, 0)
         self.assertIn("OPUS_ORCHESTRATOR_CODEX", completed.stderr)
