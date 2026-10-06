@@ -27,4 +27,4 @@ When the Run ends, print the Delegations for your final report:
 ${CLAUDE_PLUGIN_ROOT}/scripts/orchestrator.py report --run <Run id>
 ```
 
-It gives one line per Delegation (model, effort, status, tokens, waiting time and duration), marks Astra Delegations, and totals the tokens per model. Include it in the report so the user sees where each side's Quota went, and say which work you did yourself after a Delegation failed.
+It gives one line per Delegation (model, effort, status, tokens, waiting time and duration), marks Astra Delegations, and totals the tokens per model. Include it in the report so the user sees where each side's Quota went.

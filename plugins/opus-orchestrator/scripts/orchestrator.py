@@ -172,7 +172,7 @@ def delegate(args: argparse.Namespace) -> int:
             ) from None
     duration = time.monotonic() - started
 
-    result = read_result(last_message)
+    result = read_json_object(last_message)  # The Delegate's final message.
     if result is None:
         raise WrapperError(
             f"Codex returned no Result (exit code {codex.returncode}); "
@@ -199,13 +199,22 @@ def delegate(args: argparse.Namespace) -> int:
     return 0
 
 
-def read_result(last_message: Path) -> dict[str, Any] | None:
-    """The Delegate's final message, if it is a JSON object."""
+def read_json_object(path: Path) -> dict[str, Any] | None:
+    """The file's content, if it is a JSON object."""
     try:
-        result = json.loads(last_message.read_text())
+        data = json.loads(path.read_text())
     except (OSError, ValueError):
         return None
-    return result if isinstance(result, dict) else None
+    return data if isinstance(data, dict) else None
+
+
+def add_usage(total: dict[str, int] | None, usage: dict[str, Any]) -> dict[str, int]:
+    """`total` with the token counts in `usage` added; non-integer counts count as zero."""
+    total = total or dict.fromkeys(USAGE_FIELDS, 0)
+    for field in USAGE_FIELDS:
+        count = usage.get(field)
+        total[field] += count if isinstance(count, int) else 0
+    return total
 
 
 def read_events(events_path: Path) -> tuple[str | None, dict[str, int] | None]:
@@ -222,10 +231,7 @@ def read_events(events_path: Path) -> tuple[str | None, dict[str, int] | None]:
         if event.get("type") == "thread.started" and thread_id is None:
             thread_id = event.get("thread_id")
         elif event.get("type") == "turn.completed" and isinstance(event.get("usage"), dict):
-            usage = usage or dict.fromkeys(USAGE_FIELDS, 0)
-            for field in USAGE_FIELDS:
-                count = event["usage"].get(field)
-                usage[field] += count if isinstance(count, int) else 0
+            usage = add_usage(usage, event["usage"])
     return thread_id, usage
 
 
@@ -252,17 +258,13 @@ def print_summary(result_path: Path, result: dict[str, Any], evidence: dict[str,
     print(f"Summary: {summary}")
 
 
-def read_json_object(path: Path) -> dict[str, Any] | None:
-    try:
-        data = json.loads(path.read_text())
-    except (OSError, ValueError):
-        return None
-    return data if isinstance(data, dict) else None
-
-
-def is_astra(model: str) -> bool:
+def astra_mark(model: str) -> str:
     # Astra needs the user's permission, so every Astra Delegation stands out (ADR 0003).
-    return "astra" in model.lower()
+    return "  ASTRA" if "astra" in model.lower() else ""
+
+
+def format_seconds(seconds: Any) -> str:
+    return f"{seconds:.1f} s" if isinstance(seconds, (int, float)) else "not recorded"
 
 
 def report(args: argparse.Namespace) -> int:
@@ -284,25 +286,21 @@ def report(args: argparse.Namespace) -> int:
             status += f" ({evidence['failure_kind']})"
         usage = evidence.get("usage")
         print(
-            f"{delegation_dir.name}  {model}{'  ASTRA' if is_astra(model) else ''}  "
+            f"{delegation_dir.name}  {model}{astra_mark(model)}  "
             f"effort {evidence.get('effort')}  {status}  "
             f"tokens {format_tokens(usage)}  "
-            f"waited {float(evidence.get('wait_seconds') or 0):.1f} s, "
-            f"ran {float(evidence.get('duration_seconds') or 0):.1f} s"
+            f"waited {format_seconds(evidence.get('wait_seconds'))}, "
+            f"ran {format_seconds(evidence.get('duration_seconds'))}"
         )
         count, summed = totals.get(model, (0, None))
-        if isinstance(usage, dict):
-            summed = summed or dict.fromkeys(USAGE_FIELDS, 0)
-            for field in USAGE_FIELDS:
-                summed[field] += usage.get(field) or 0
-        totals[model] = (count + 1, summed)
+        totals[model] = (count + 1, add_usage(summed, usage) if isinstance(usage, dict) else summed)
 
     if totals:
         print("Tokens per model:")
     for model, (count, summed) in totals.items():
         print(
             f"  {model}: {format_tokens(summed)}, {count} Delegation{'' if count == 1 else 's'}"
-            f"{'  ASTRA' if is_astra(model) else ''}"
+            f"{astra_mark(model)}"
         )
     return 0
 

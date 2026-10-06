@@ -78,7 +78,7 @@ class RunReportTest(ReportTestCase):
             self.assertIn(status, line)
             for count in tokens:
                 self.assertIn(count, line)
-            self.assertIn("waited 0.0 s", line)
+            self.assertIn("waited not recorded", line)
             self.assertRegex(line, r"ran \d+\.\d s")
 
     def test_lists_delegations_in_the_order_they_were_started(self) -> None:
@@ -87,7 +87,7 @@ class RunReportTest(ReportTestCase):
 
         stdout = self.report_stdout(run_id)
 
-        listed = [line.split()[0] for line in stdout.splitlines() if line.split()[:1] in ([i] for i in ids)]
+        listed = [line.split()[0] for line in stdout.splitlines() if line.split()[0] in ids]
         self.assertEqual(listed, ids)
 
     def test_marks_astra_delegations(self) -> None:
