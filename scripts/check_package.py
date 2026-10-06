@@ -179,9 +179,12 @@ def check_markdown_links() -> list[str]:
             for target in targets:
                 if re.match(r"^[a-z][a-z0-9+.-]*:", target, re.IGNORECASE) or target.startswith("#"):
                     continue  # A URL or an anchor in the same file.
-                local = target.split("#", 1)[0]
-                if not (path.parent / local).exists():
-                    problems.append(f"{path.relative_to(REPO_ROOT)}:{number}: broken link {target}")
+                local = (path.parent / target.split("#", 1)[0]).resolve()
+                where = f"{path.relative_to(REPO_ROOT)}:{number}"
+                if not local.is_relative_to(REPO_ROOT):
+                    problems.append(f"{where}: link leaves the repository: {target}")
+                elif not local.exists():
+                    problems.append(f"{where}: broken link {target}")
     return problems
 
 

@@ -324,7 +324,7 @@ Dated **2026-10-06**. Read alongside the live catalog (`codex debug models`). Re
 4. **Read-only investigation.** Luna medium against Sol low and medium on planted-fact repository Q&A with mandatory citations, measuring unsupported claims and abstentions.
 5. **Second opinions on planted-bug reviews.** Sol medium, high and xhigh against Astra high, measuring recall, precision and Quota.
 6. **Unattended behaviour per model.** Rate of `blocked` Results and questions asked, early stops, `done` claims contradicted by Checks, and schema violations.
-7. **Requested vs realized model and effort.** Rollouts record the requested `model` and `effort` in `turn_context` but not the served model. Flag Invalid Trials as the benchmark suite defines them ([benchmarks CONTEXT.md](../../../benchmarks/CONTEXT.md)). Use `RUST_LOG=trace` response frames, as in [#46632](https://github.com/openai/codex/issues/46632), or reasoning-token signatures.
+7. **Requested vs realized model and effort.** Rollouts record the requested `model` and `effort` in `turn_context` but not the served model. Flag Invalid Trials as the benchmark suite defines them (`CONTEXT.md` of the user's local, unpublished benchmarks project). Use `RUST_LOG=trace` response frames, as in [#46632](https://github.com/openai/codex/issues/46632), or reasoning-token signatures.
 8. **Retry against escalation.** Compare two Sol-medium attempts selected by a Check with one Sol-xhigh attempt.
 9. **Wall time per effort**, since Delegations block the Orchestrator.
 
