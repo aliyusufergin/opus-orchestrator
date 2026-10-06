@@ -1,0 +1,86 @@
+{
+  "type": "object",
+  "description": "The Result a Delegate returns. Every field is required; fields that don't apply are null.",
+  "additionalProperties": false,
+  "required": [
+    "status",
+    "summary",
+    "changed_files",
+    "checks",
+    "assumptions",
+    "open_questions",
+    "findings"
+  ],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["done", "partial", "blocked"],
+      "description": "done only when every success criterion holds; blocked when a decision is needed to continue."
+    },
+    "summary": {
+      "type": "string",
+      "description": "What was found or done, in a few sentences."
+    },
+    "changed_files": {
+      "anyOf": [
+        { "type": "array", "items": { "type": "string" } },
+        { "type": "null" }
+      ],
+      "description": "Repository-relative paths the Delegate changed."
+    },
+    "checks": {
+      "anyOf": [
+        {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["command", "exit_code"],
+            "properties": {
+              "command": { "type": "string" },
+              "exit_code": { "type": "integer" }
+            }
+          }
+        },
+        { "type": "null" }
+      ],
+      "description": "Checks the Delegate ran, each with its exit code."
+    },
+    "assumptions": {
+      "anyOf": [
+        { "type": "array", "items": { "type": "string" } },
+        { "type": "null" }
+      ]
+    },
+    "open_questions": {
+      "anyOf": [
+        { "type": "array", "items": { "type": "string" } },
+        { "type": "null" }
+      ],
+      "description": "For status blocked, the smallest question whose answer would unblock the Delegate."
+    },
+    "findings": {
+      "anyOf": [
+        {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["title", "location", "evidence", "severity"],
+            "properties": {
+              "title": { "type": "string" },
+              "location": {
+                "anyOf": [{ "type": "string" }, { "type": "null" }],
+                "description": "File and line, or null when the Finding has no single location."
+              },
+              "evidence": { "type": "string" },
+              "severity": { "type": "string", "enum": ["high", "medium", "low"] }
+            }
+          }
+        },
+        { "type": "null" }
+      ],
+      "description": "Problems found, each a hypothesis for the Orchestrator to reproduce."
+    }
+  }
+}

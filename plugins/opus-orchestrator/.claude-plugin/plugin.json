@@ -1,0 +1,10 @@
+{
+  "name": "opus-orchestrator",
+  "version": "0.1.0",
+  "description": "Claude Opus orchestrates a Run and delegates bounded pieces of the work to OpenAI models through Codex.",
+  "author": {
+    "name": "Ali Yusuf"
+  },
+  "repository": "https://github.com/aliyusufergin/opus-orchestrator",
+  "keywords": ["orchestration", "delegation", "codex", "openai"]
+}

@@ -1,0 +1,1 @@
+{"status":"blocked","summary":"Two greeting modules exist and the task part doesn't say which one is meant.","changed_files":null,"checks":null,"assumptions":null,"open_questions":["Is the task about src/greet.py or legacy/greet.py?"],"findings":null}
