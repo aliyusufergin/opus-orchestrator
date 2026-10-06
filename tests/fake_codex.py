@@ -1,0 +1,130 @@
+#!/usr/bin/env python3
+"""A stand-in for the `codex` executable in wrapper tests.
+
+It accepts the `codex exec` options of Codex CLI 0.159.2 and rejects anything
+else, reads stdin the way `codex exec` does (to end of file, so it hangs when
+stdin is left open), records what it received, with options under their long
+names, then plays back a scenario from tests/fixtures/codex.
+
+Environment:
+  FAKE_CODEX_SCENARIO  scenario directory to play back
+  FAKE_CODEX_RECORD    directory to write the invocation record into
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import sys
+from pathlib import Path
+
+# `codex exec --help`, Codex CLI 0.159.2.
+OPTIONS_WITH_VALUE = {
+    "-c": "--config",
+    "--config": "--config",
+    "--enable": "--enable",
+    "--disable": "--disable",
+    "-i": "--image",
+    "--image": "--image",
+    "-m": "--model",
+    "--model": "--model",
+    "--local-provider": "--local-provider",
+    "-p": "--profile",
+    "--profile": "--profile",
+    "-s": "--sandbox",
+    "--sandbox": "--sandbox",
+    "-C": "--cd",
+    "--cd": "--cd",
+    "--add-dir": "--add-dir",
+    "--thread-source": "--thread-source",
+    "--output-schema": "--output-schema",
+    "--color": "--color",
+    "-o": "--output-last-message",
+    "--output-last-message": "--output-last-message",
+}
+FLAGS = {
+    "--strict-config",
+    "--oss",
+    "--approve-for-me",
+    "--dangerously-bypass-approvals-and-sandbox",
+    "--dangerously-bypass-hook-trust",
+    "--worktree",
+    "--skip-git-repo-check",
+    "--ephemeral",
+    "--ignore-user-config",
+    "--ignore-rules",
+    "--json",
+}
+SANDBOX_MODES = {"read-only", "workspace-write", "danger-full-access"}
+
+
+def fail(message: str) -> int:
+    print(f"error: {message}", file=sys.stderr)
+    return 2
+
+
+def main(argv: list[str]) -> int:
+    if argv[:1] != ["exec"]:
+        return fail("the fake supports only `codex exec`")
+
+    options: dict[str, list[str]] = {}
+    flags: list[str] = []
+    positionals: list[str] = []
+    args = iter(argv[1:])
+    for arg in args:
+        name, has_inline, inline = arg.partition("=")
+        if name in OPTIONS_WITH_VALUE:
+            value = inline if has_inline else next(args, None)
+            if value is None:
+                return fail(f"a value is required for '{name}'")
+            options.setdefault(OPTIONS_WITH_VALUE[name], []).append(value)
+        elif arg in FLAGS:
+            flags.append(arg)
+        elif arg.startswith("-") and arg != "-":
+            return fail(f"unexpected argument '{arg}' found")
+        else:
+            positionals.append(arg)
+
+    for mode in options.get("--sandbox", []):
+        if mode not in SANDBOX_MODES:
+            return fail(f"invalid value '{mode}' for '--sandbox <SANDBOX_MODE>'")
+
+    # As codex exec: `-` forces reading the prompt from stdin; with a prompt
+    # argument, piped stdin is read as additional input.
+    prompt = positionals[0] if positionals else None
+    stdin_text = None
+    if prompt == "-" or not sys.stdin.isatty():
+        if prompt is None:
+            print("Reading prompt from stdin...", file=sys.stderr)
+        elif prompt != "-":
+            print("Reading additional input from stdin...", file=sys.stderr)
+        stdin_text = sys.stdin.read()
+
+    record_dir = Path(os.environ["FAKE_CODEX_RECORD"])
+    record_dir.mkdir(parents=True, exist_ok=True)
+    record = {
+        "argv": argv,
+        "subcommand": argv[0],
+        "options": options,
+        "flags": flags,
+        "positionals": positionals,
+        "stdin": stdin_text,
+        "cwd": os.getcwd(),
+    }
+    (record_dir / f"{os.getpid()}.json").write_text(json.dumps(record, indent=2))
+
+    scenario = Path(os.environ["FAKE_CODEX_SCENARIO"])
+    sys.stdout.write((scenario / "events.jsonl").read_text())
+    sys.stdout.flush()
+
+    last_message = scenario / "last-message.json"
+    output_paths = options.get("--output-last-message", [])
+    if last_message.exists() and output_paths:
+        Path(output_paths[-1]).write_text(last_message.read_text())
+
+    exit_code = scenario / "exit-code"
+    return int(exit_code.read_text()) if exit_code.exists() else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

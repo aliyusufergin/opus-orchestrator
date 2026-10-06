@@ -1,0 +1,14 @@
+{
+  "name": "opus-orchestrator",
+  "description": "The Opus Orchestrator plugin, installed from this repository.",
+  "owner": {
+    "name": "Ali Yusuf"
+  },
+  "plugins": [
+    {
+      "name": "opus-orchestrator",
+      "source": "./plugins/opus-orchestrator",
+      "description": "Claude Opus orchestrates a Run and delegates bounded pieces of the work to OpenAI models through Codex."
+    }
+  ]
+}
