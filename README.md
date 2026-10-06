@@ -2,7 +2,7 @@
 
 A Claude Code plugin in which a Claude Opus session, started by you for a task, hands bounded pieces of the work to OpenAI models through Codex and stays responsible for the outcome. The vocabulary is in [CONTEXT.md](CONTEXT.md) and the decisions are in [docs/adr](docs/adr).
 
-This is an early version. It runs read-only Delegations only, and its skill is a minimal pointer to the wrapper. The full skill will be written from measured gaps. Some wrapper invariants from [ADR 0001](docs/adr/0001-free-method-explicit-interface-invariants-in-code.md) and [ADR 0003](docs/adr/0003-cost-is-quota-concurrency-capped-astra-needs-permission.md) aren't enforced yet: there is no timeout, no limit of three concurrent Delegations, and no refusal of `ultra` effort or of models missing from Codex's catalog.
+This is an early version. Its skill is a minimal pointer to the wrapper. The full skill will be written from measured gaps. Some wrapper invariants from [ADR 0001](docs/adr/0001-free-method-explicit-interface-invariants-in-code.md) and [ADR 0003](docs/adr/0003-cost-is-quota-concurrency-capped-astra-needs-permission.md) aren't enforced yet: there is no timeout, no limit of three concurrent Delegations, no rerun of a Contract's Checks, and no refusal of `ultra` effort or of models missing from Codex's catalog.
 
 ## Requirements
 
@@ -31,7 +31,9 @@ Inside a session, `/plugin marketplace add /path/to/opus-orchestrator` does the 
 
 Only you can start a Run: Claude never invokes the skill on its own. `--allow-astra` lets the Orchestrator use GPT-6 Astra for this Run ([ADR 0003](docs/adr/0003-cost-is-quota-concurrency-capped-astra-needs-permission.md)).
 
-Starting the skill creates a Run record in `.git/opus-orchestrator/runs/<Run id>/`, inside the repository's Git directory, so it is never tracked. Each Delegation leaves a folder there with its full Contract, Codex's JSONL events, the Result and the wrapper's evidence.
+Starting the skill creates a Run record in `.git/opus-orchestrator/runs/<Run id>/`, inside the repository's Git directory, so it is never tracked. Each Delegation leaves a folder there with its full Contract, Codex's JSONL events, the Result and the wrapper's evidence, and for a writing Delegation its diff.
+
+A writing Delegation runs in a Git worktree in the system's temporary directory, made from a Snapshot of your working tree: an unreferenced commit recorded through a temporary index, so your index, HEAD and branches stay as they are. The worktree is removed when the Delegation ends, also when it fails or the wrapper is stopped.
 
 ## What a Run sends to OpenAI
 

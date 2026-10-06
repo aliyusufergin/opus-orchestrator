@@ -1,0 +1,5 @@
+{"type":"thread.started","thread_id":"01a11b35-1e5f-7071-ac8d-9e0f1a2b3c4d"}
+{"type":"turn.started"}
+{"type":"item.started","item":{"id":"item_0","type":"file_change","changes":[{"path":"src/greet.py","kind":"update"}],"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_0","type":"file_change","changes":[{"path":"src/greet.py","kind":"update"}],"status":"completed"}}
+{"type":"turn.failed","error":{"message":"stream disconnected before completion"}}
