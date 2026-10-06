@@ -16,4 +16,13 @@ The events are built from real `codex exec --json` output, recorded with Codex C
 | `read-only-blocked` | A recorded `codex exec` call with only a final message (usage 13661 input, 19 output) |
 | `no-result` | The recorded opening events, then a `turn.failed` event shaped after Codex's documented event types. No failure was recorded. |
 
+## Model catalogs
+
+[`catalogs/`](catalogs) holds what `codex debug models` prints, selected by `FAKE_CODEX_CATALOG`:
+
+| Catalog | Built from |
+| --- | --- |
+| `recorded` | `codex debug models` from Codex CLI 0.159.2 with ChatGPT sign-in, recorded on 2026-10-06, trimmed to the fields the wrapper reads or a reader needs: slug, name, description, default and supported efforts, visibility and priority |
+| `uncovered` | `recorded` plus a listed `gpt-7-nova` that no Model notes cover |
+
 The real-Codex check (issue #9) refreshes these from new recordings.

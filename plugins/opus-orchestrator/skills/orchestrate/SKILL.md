@@ -18,5 +18,5 @@ ${CLAUDE_PLUGIN_ROOT}/scripts/orchestrator.py delegate --run <Run id> --task <ta
 
 - Write the task part to a file outside the repository, so that it stays out of `git status` and out of what the Delegate reads. The wrapper adds the fixed part of the Contract and stores the full Contract in the Run record.
 - Write scope `none` is the only one available. The Delegate reads the current working tree in a read-only sandbox, without network access.
-- Models: `gpt-6.1-sol`, `gpt-6-luna`, and `gpt-6-astra` only when the user's arguments above include `--allow-astra`. Efforts: `low`, `medium`, `high`, `xhigh`.
+- Choose the model and effort from the [Model notes](model-notes.md): they give each model's default effort, uses, things to avoid and relative Quota cost. The list above is Codex's live catalog; a warning above it means the notes may be stale, so lean on the catalog's own descriptions for what they don't cover. Use `gpt-6-astra` only when the user's arguments above include `--allow-astra`. The wrapper refuses `ultra` and any model or effort the live catalog lacks.
 - A Delegation can take several minutes, so run the command in the background. Its output names the Result file and summarises the Result; `evidence.json` beside the Result is the wrapper's own record of the Delegation.

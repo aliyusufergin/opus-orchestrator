@@ -15,17 +15,26 @@ import os
 import secrets
 import subprocess
 import sys
+import re
 import time
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 FIXED_PART = PLUGIN_ROOT / "contract" / "fixed-part.md"
 RESULT_SCHEMA = PLUGIN_ROOT / "schemas" / "result.schema.json"
+MODEL_NOTES = PLUGIN_ROOT / "skills" / "orchestrate" / "model-notes.md"
 
 # Replaces the Codex executable; the test seam.
 CODEX_ENV = "OPUS_ORCHESTRATOR_CODEX"
+# Replaces the Model notes, so tests can date them.
+MODEL_NOTES_ENV = "OPUS_ORCHESTRATOR_MODEL_NOTES"
+
+# Older notes may no longer match the catalog or the models' measured strengths.
+MODEL_NOTES_MAX_AGE_DAYS = 30
+# `ultra` is xhigh plus automatic subagent delegation, which Delegates never get (ADR 0006).
+REFUSED_EFFORTS = {"ultra"}
 
 # Run records live in the repository's Git directory, so they are never tracked.
 RECORD_DIR = "opus-orchestrator"
@@ -82,6 +91,126 @@ def create_first_free(parent: Path, names: Iterable[str]) -> Path:
     raise WrapperError(f"no free name for a directory in {parent}")
 
 
+def codex_executable() -> str:
+    return os.environ.get(CODEX_ENV) or "codex"
+
+
+def read_catalog(cwd: Path) -> list[dict[str, Any]]:
+    """The models in Codex's live catalog, from `codex debug models`."""
+    command = [codex_executable(), "debug", "models"]
+    try:
+        completed = subprocess.run(
+            command, cwd=cwd, stdin=subprocess.DEVNULL, capture_output=True, text=True
+        )
+    except OSError as error:
+        raise WrapperError(
+            f"cannot run Codex ({command[0]}) to read its model catalog: {error.strerror}; "
+            f"set {CODEX_ENV} to its path"
+        ) from None
+    if completed.returncode != 0:
+        raise WrapperError(
+            f"codex debug models failed (exit code {completed.returncode}): {completed.stderr.strip()}"
+        )
+    try:
+        models = json.loads(completed.stdout)["models"]
+    except (ValueError, KeyError, TypeError):
+        raise WrapperError("codex debug models printed no model catalog") from None
+    if not isinstance(models, list):
+        raise WrapperError("codex debug models printed no model catalog")
+    return [model for model in models if isinstance(model, dict) and isinstance(model.get("slug"), str)]
+
+
+def supported_efforts(model: dict[str, Any]) -> list[str]:
+    levels = model.get("supported_reasoning_levels")
+    if not isinstance(levels, list):
+        return []
+    efforts = (level.get("effort") for level in levels if isinstance(level, dict))
+    return [effort for effort in efforts if isinstance(effort, str)]
+
+
+def model_notes_path() -> Path:
+    return Path(os.environ.get(MODEL_NOTES_ENV) or MODEL_NOTES)
+
+
+def read_model_notes(path: Path) -> tuple[str | None, set[str]]:
+    """The Model notes' `date` field as written, and the models their table covers."""
+    text = path.read_text()
+    match = re.match(r"^---\n(.*?)\n---\n", text, re.DOTALL)
+    dated = None
+    for line in (match.group(1) if match else "").splitlines():
+        key, sep, value = line.partition(":")
+        if sep and key.strip() == "date":
+            dated = value.strip().strip("\"'")
+    covered = set()
+    for line in text.splitlines():
+        cells = line.strip().split("|")
+        if line.lstrip().startswith("|") and len(cells) > 2:
+            covered.update(re.findall(r"`([^`]+)`", cells[1]))
+    return dated, covered
+
+
+def model_notes_warnings(notes: Path, dated: str | None, today: date) -> list[str]:
+    try:
+        age = (today - date.fromisoformat(dated or "")).days
+    except ValueError:
+        return [f"the Model notes ({notes}) have no `date: YYYY-MM-DD` line; treat them as stale."]
+    if age > MODEL_NOTES_MAX_AGE_DAYS:
+        return [
+            f"the Model notes are {age} days old (dated {dated}); their routing guidance may be stale."
+        ]
+    return []
+
+
+def print_models(cwd: Path) -> None:
+    """Show the live catalog's models and warn where the Model notes may mislead."""
+    notes = model_notes_path()
+    warnings = []
+    covered: set[str] | None = None
+    try:
+        dated, covered = read_model_notes(notes)
+    except OSError as error:
+        warnings.append(f"cannot read the Model notes: {error}")
+    else:
+        print(f"Model notes: {notes} (dated {dated})")
+        warnings += model_notes_warnings(notes, dated, date.today())
+    try:
+        # Hidden models are Codex's own or retired; only listed ones are offered.
+        listed = [m["slug"] for m in read_catalog(cwd) if m.get("visibility", "list") == "list"]
+    except WrapperError as error:
+        warnings.append(f"cannot check the live model catalog: {error}")
+    else:
+        print(f"Models: {', '.join(listed)}")
+        uncovered = [slug for slug in listed if covered is not None and slug not in covered]
+        if uncovered:
+            warnings.append(
+                f"the Model notes don't cover {', '.join(uncovered)}; "
+                "route by the catalog's description until they do."
+            )
+    for warning in warnings:
+        print(f"Warning: {warning}")
+
+
+def check_model_and_effort(cwd: Path, model: str, effort: str) -> None:
+    """Refuse `ultra`, and any model or effort missing from the live catalog."""
+    if effort in REFUSED_EFFORTS:
+        raise WrapperError(
+            f"effort {effort!r} is refused: it adds automatic subagent delegation; use xhigh at most",
+            EXIT_USAGE,
+        )
+    catalog = {entry["slug"]: entry for entry in read_catalog(cwd)}
+    if model not in catalog:
+        raise WrapperError(
+            f"model {model!r} isn't in Codex's live model catalog; available: {', '.join(catalog)}",
+            EXIT_USAGE,
+        )
+    efforts = [e for e in supported_efforts(catalog[model]) if e not in REFUSED_EFFORTS]
+    if efforts and effort not in efforts:
+        raise WrapperError(
+            f"model {model!r} doesn't support effort {effort!r}; supported: {', '.join(efforts)}",
+            EXIT_USAGE,
+        )
+
+
 def start_run(_: argparse.Namespace) -> int:
     run_dir = create_first_free(
         runs_dir(Path.cwd()),
@@ -94,6 +223,7 @@ def start_run(_: argparse.Namespace) -> int:
     write_json(run_dir / "run.json", {"run_id": run_id, "started_at": now()})
     print(f"Run id: {run_id}")
     print(f"Run record: {run_dir}")
+    print_models(Path.cwd())
     return 0
 
 
@@ -112,7 +242,7 @@ def new_delegation(run_dir: Path) -> Path:
 
 def codex_command(args: argparse.Namespace, workdir: Path, last_message: Path) -> list[str]:
     return [
-        os.environ.get(CODEX_ENV) or "codex",
+        codex_executable(),
         "exec",
         "--model", args.model,
         "-c", f"model_reasoning_effort={json.dumps(args.effort)}",
@@ -141,6 +271,7 @@ def delegate(args: argparse.Namespace) -> int:
     except OSError as error:
         raise WrapperError(f"cannot read the task part: {error}", EXIT_USAGE) from None
     workdir = Path(git(cwd, "rev-parse", "--show-toplevel"))
+    check_model_and_effort(workdir, args.model, args.effort)
 
     contract = f"{FIXED_PART.read_text().rstrip()}\n\n{task_part}"
     delegation_dir = new_delegation(run_dir)

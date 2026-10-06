@@ -18,6 +18,7 @@ PLUGIN_ROOT = REPO_ROOT / "plugins" / "opus-orchestrator"
 WRAPPER = PLUGIN_ROOT / "scripts" / "orchestrator.py"
 FAKE_CODEX = TESTS_DIR / "fake_codex.py"
 SCENARIOS = TESTS_DIR / "fixtures" / "codex"
+CATALOGS = SCENARIOS / "catalogs"
 
 # Keeps a test that waits on a hung process from hanging the suite.
 WRAPPER_TIMEOUT_SECONDS = 30
@@ -95,13 +96,18 @@ class WrapperTestCase(unittest.TestCase):
         *args: str,
         cwd: Path | None = None,
         scenario: str = "read-only-done",
+        catalog: str = "recorded",
+        model_notes: Path | None = None,
         codex: Path = FAKE_CODEX,
         stdin: int | IO[Any] | None = subprocess.DEVNULL,
     ) -> subprocess.CompletedProcess[str]:
         env = isolated_env()
         env["FAKE_CODEX_SCENARIO"] = str(SCENARIOS / scenario)
+        env["FAKE_CODEX_CATALOG"] = str(CATALOGS / f"{catalog}.json")
         env["FAKE_CODEX_RECORD"] = str(self.codex_records)
         env["OPUS_ORCHESTRATOR_CODEX"] = str(codex)
+        if model_notes is not None:
+            env["OPUS_ORCHESTRATOR_MODEL_NOTES"] = str(model_notes)
         return subprocess.run(
             [str(WRAPPER), *args],
             cwd=cwd or self.repo,
@@ -125,13 +131,15 @@ class WrapperTestCase(unittest.TestCase):
         task.write_text(text)
         return task
 
-    def codex_calls(self) -> list[CodexCall]:
+    def codex_calls(self, subcommand: str = "exec") -> list[CodexCall]:
+        """The fake Codex's invocations of one subcommand, `exec` unless given."""
         if not self.codex_records.exists():
             return []
-        return [
+        calls = [
             CodexCall(**json.loads(path.read_text()))
             for path in sorted(self.codex_records.glob("*.json"))
         ]
+        return [call for call in calls if call.subcommand == subcommand]
 
     def only_codex_call(self) -> CodexCall:
         calls = self.codex_calls()

@@ -6,8 +6,11 @@ else, reads stdin the way `codex exec` does (to end of file, so it hangs when
 stdin is left open), records what it received, with options under their long
 names, then plays back a scenario from tests/fixtures/codex.
 
+`codex debug models` prints a model catalog from tests/fixtures/codex/catalogs.
+
 Environment:
   FAKE_CODEX_SCENARIO  scenario directory to play back
+  FAKE_CODEX_CATALOG   catalog file for `codex debug models`
   FAKE_CODEX_RECORD    directory to write the invocation record into
 """
 
@@ -63,9 +66,42 @@ def fail(message: str) -> int:
     return 2
 
 
+def record(invocation: dict[str, object]) -> None:
+    record_dir = Path(os.environ["FAKE_CODEX_RECORD"])
+    record_dir.mkdir(parents=True, exist_ok=True)
+    (record_dir / f"{os.getpid()}.json").write_text(json.dumps(invocation, indent=2))
+
+
+def debug_models(argv: list[str]) -> int:
+    """`codex debug models`, which takes only config overrides and --bundled."""
+    args = iter(argv)
+    for arg in args:
+        name, has_inline, _ = arg.partition("=")
+        if name in {"-c", "--config", "--enable", "--disable"}:
+            if not has_inline and next(args, None) is None:
+                return fail(f"a value is required for '{name}'")
+        elif arg != "--bundled":
+            return fail(f"unexpected argument '{arg}' found")
+    record(
+        {
+            "argv": ["debug", "models", *argv],
+            "subcommand": "debug models",
+            "options": {},
+            "flags": [],
+            "positionals": [],
+            "stdin": None,
+            "cwd": os.getcwd(),
+        }
+    )
+    sys.stdout.write(Path(os.environ["FAKE_CODEX_CATALOG"]).read_text())
+    return 0
+
+
 def main(argv: list[str]) -> int:
+    if argv[:2] == ["debug", "models"]:
+        return debug_models(argv[2:])
     if argv[:1] != ["exec"]:
-        return fail("the fake supports only `codex exec`")
+        return fail("the fake supports only `codex exec` and `codex debug models`")
 
     options: dict[str, list[str]] = {}
     flags: list[str] = []
@@ -100,18 +136,17 @@ def main(argv: list[str]) -> int:
             print("Reading additional input from stdin...", file=sys.stderr)
         stdin_text = sys.stdin.read()
 
-    record_dir = Path(os.environ["FAKE_CODEX_RECORD"])
-    record_dir.mkdir(parents=True, exist_ok=True)
-    record = {
-        "argv": argv,
-        "subcommand": argv[0],
-        "options": options,
-        "flags": flags,
-        "positionals": positionals,
-        "stdin": stdin_text,
-        "cwd": os.getcwd(),
-    }
-    (record_dir / f"{os.getpid()}.json").write_text(json.dumps(record, indent=2))
+    record(
+        {
+            "argv": argv,
+            "subcommand": argv[0],
+            "options": options,
+            "flags": flags,
+            "positionals": positionals,
+            "stdin": stdin_text,
+            "cwd": os.getcwd(),
+        }
+    )
 
     scenario = Path(os.environ["FAKE_CODEX_SCENARIO"])
     sys.stdout.write((scenario / "events.jsonl").read_text())
