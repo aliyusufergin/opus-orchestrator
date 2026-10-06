@@ -4,6 +4,7 @@
 Commands:
   start-run  create a Run record and print the Run id
   delegate   run one Delegation through Codex and write its Result
+  report     print one line per Delegation of a Run, with token totals per model
 """
 
 from __future__ import annotations
@@ -108,6 +109,15 @@ def new_delegation(run_dir: Path) -> Path:
     delegations = run_dir / "delegations"
     taken = len(list(delegations.iterdir())) if delegations.exists() else 0
     return create_first_free(delegations, (f"d{n}" for n in itertools.count(taken + 1)))
+
+
+def delegations_in_order(run_dir: Path) -> list[Path]:
+    """The Run's Delegation directories, d1, d2, ... in the order they were started."""
+    delegations = run_dir / "delegations"
+    if not delegations.is_dir():
+        return []
+    found = [p for p in delegations.iterdir() if p.is_dir() and p.name[1:].isdigit()]
+    return sorted(found, key=lambda p: int(p.name[1:]))
 
 
 def codex_command(args: argparse.Namespace, workdir: Path, last_message: Path) -> list[str]:
@@ -219,14 +229,17 @@ def read_events(events_path: Path) -> tuple[str | None, dict[str, int] | None]:
     return thread_id, usage
 
 
-def print_summary(result_path: Path, result: dict[str, Any], evidence: dict[str, Any]) -> None:
-    usage = evidence["usage"]
-    tokens = (
+def format_tokens(usage: dict[str, int] | None) -> str:
+    if not usage:
+        return "not reported"
+    return (
         f"{usage['input_tokens']} input ({usage['cached_input_tokens']} cached), "
         f"{usage['output_tokens']} output ({usage['reasoning_output_tokens']} reasoning)"
-        if usage
-        else "not reported"
     )
+
+
+def print_summary(result_path: Path, result: dict[str, Any], evidence: dict[str, Any]) -> None:
+    tokens = format_tokens(evidence["usage"])
     summary = " ".join(str(result.get("summary", "")).split())
     if len(summary) > SUMMARY_LIMIT:
         summary = summary[: SUMMARY_LIMIT - 1] + "…"
@@ -237,6 +250,61 @@ def print_summary(result_path: Path, result: dict[str, Any], evidence: dict[str,
     print(f"Duration: {evidence['duration_seconds']:.1f} s")
     print(f"Tokens: {tokens}")
     print(f"Summary: {summary}")
+
+
+def read_json_object(path: Path) -> dict[str, Any] | None:
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def is_astra(model: str) -> bool:
+    # Astra needs the user's permission, so every Astra Delegation stands out (ADR 0003).
+    return "astra" in model.lower()
+
+
+def report(args: argparse.Namespace) -> int:
+    run_dir = run_record(Path.cwd(), args.run)
+    delegation_dirs = delegations_in_order(run_dir)
+    print(f"Run {args.run}: " + (f"{len(delegation_dirs)} Delegations" if delegation_dirs else "no Delegations"))
+
+    # Per model: Delegation count and summed usage, None while no Delegation reported usage.
+    totals: dict[str, tuple[int, dict[str, int] | None]] = {}
+    for delegation_dir in delegation_dirs:
+        evidence = read_json_object(delegation_dir / "evidence.json")
+        if evidence is None:
+            print(f"{delegation_dir.name}  no evidence: still running, or the wrapper failed")
+            continue
+        model = str(evidence.get("model"))
+        result = read_json_object(delegation_dir / "result.json")
+        status = str(result.get("status")) if result else "no Result"
+        if evidence.get("failure_kind"):
+            status += f" ({evidence['failure_kind']})"
+        usage = evidence.get("usage")
+        print(
+            f"{delegation_dir.name}  {model}{'  ASTRA' if is_astra(model) else ''}  "
+            f"effort {evidence.get('effort')}  {status}  "
+            f"tokens {format_tokens(usage)}  "
+            f"waited {float(evidence.get('wait_seconds') or 0):.1f} s, "
+            f"ran {float(evidence.get('duration_seconds') or 0):.1f} s"
+        )
+        count, summed = totals.get(model, (0, None))
+        if isinstance(usage, dict):
+            summed = summed or dict.fromkeys(USAGE_FIELDS, 0)
+            for field in USAGE_FIELDS:
+                summed[field] += usage.get(field) or 0
+        totals[model] = (count + 1, summed)
+
+    if totals:
+        print("Tokens per model:")
+    for model, (count, summed) in totals.items():
+        print(
+            f"  {model}: {format_tokens(summed)}, {count} Delegation{'' if count == 1 else 's'}"
+            f"{'  ASTRA' if is_astra(model) else ''}"
+        )
+    return 0
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -253,6 +321,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     delegate_command.add_argument("--effort", required=True, help="reasoning effort, such as medium")
     delegate_command.add_argument("--write-scope", required=True, help="`none` for a read-only Delegation")
     delegate_command.set_defaults(handler=delegate)
+
+    report_command = commands.add_parser("report", help="print one line per Delegation of a Run")
+    report_command.add_argument("--run", required=True, help="the Run id from start-run")
+    report_command.set_defaults(handler=report)
 
     return parser.parse_args(argv)
 
