@@ -174,6 +174,16 @@ class DelegateModelGuardrailTest(ModelNotesTestCase):
         self.assertEqual(self.codex_calls(), [])
         self.assertFalse((record / "delegations").exists())
 
+    def test_refuses_a_model_the_catalog_hides(self) -> None:
+        run_id, _ = self.start_run()
+
+        completed = self.delegate(run_id, "codex-auto-review", "medium")
+
+        self.assertEqual(completed.returncode, 2)
+        self.assertIn("codex-auto-review", completed.stderr)
+        self.assertNotIn("codex-auto-review", completed.stderr.partition("available:")[2])
+        self.assertEqual(self.codex_calls(), [])
+
     def test_reads_the_catalog_live_at_each_delegation(self) -> None:
         run_id, _ = self.start_run()
 

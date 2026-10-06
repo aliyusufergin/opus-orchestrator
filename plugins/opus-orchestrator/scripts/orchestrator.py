@@ -96,7 +96,10 @@ def codex_executable() -> str:
 
 
 def read_catalog(cwd: Path) -> list[dict[str, Any]]:
-    """The models in Codex's live catalog, from `codex debug models`."""
+    """The models Codex's live catalog lists, from `codex debug models`.
+
+    Hidden models are Codex's own or retired, so they are neither offered nor accepted.
+    """
     command = [codex_executable(), "debug", "models"]
     try:
         completed = subprocess.run(
@@ -117,7 +120,13 @@ def read_catalog(cwd: Path) -> list[dict[str, Any]]:
         raise WrapperError("codex debug models printed no model catalog") from None
     if not isinstance(models, list):
         raise WrapperError("codex debug models printed no model catalog")
-    return [model for model in models if isinstance(model, dict) and isinstance(model.get("slug"), str)]
+    return [
+        model
+        for model in models
+        if isinstance(model, dict)
+        and isinstance(model.get("slug"), str)
+        and model.get("visibility", "list") == "list"
+    ]
 
 
 def supported_efforts(model: dict[str, Any]) -> list[str]:
@@ -174,8 +183,7 @@ def print_models(cwd: Path) -> None:
         print(f"Model notes: {notes} (dated {dated})")
         warnings += model_notes_warnings(notes, dated, date.today())
     try:
-        # Hidden models are Codex's own or retired; only listed ones are offered.
-        listed = [m["slug"] for m in read_catalog(cwd) if m.get("visibility", "list") == "list"]
+        listed = [model["slug"] for model in read_catalog(cwd)]
     except WrapperError as error:
         warnings.append(f"cannot check the live model catalog: {error}")
     else:
@@ -200,7 +208,7 @@ def check_model_and_effort(cwd: Path, model: str, effort: str) -> None:
     catalog = {entry["slug"]: entry for entry in read_catalog(cwd)}
     if model not in catalog:
         raise WrapperError(
-            f"model {model!r} isn't in Codex's live model catalog; available: {', '.join(catalog)}",
+            f"model {model!r} isn't listed in Codex's live model catalog; available: {', '.join(catalog)}",
             EXIT_USAGE,
         )
     efforts = [e for e in supported_efforts(catalog[model]) if e not in REFUSED_EFFORTS]
