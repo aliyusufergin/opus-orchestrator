@@ -7,3 +7,7 @@ Codex's own `--worktree` starts from `HEAD`, drops uncommitted and untracked cha
 - Codex `--worktree`: rejected for the reasons above, and because finding its path through `git worktree list` races with concurrent Delegations.
 - Writing Delegations in sequence on the main working tree: rejected because it gives up parallel writes and lets a Delegate touch files outside its Write scope unseen.
 - The Orchestrator commits every integrated piece, as the sibling codex-orchestration project does: rejected because commits stay the user's decision, as in Claude Code generally.
+
+## Consequences
+
+The Orchestrator applies a diff through the wrapper's `apply` command rather than with `git apply --3way` directly. A Snapshot usually holds uncommitted work, and plain `git apply --3way` refuses every file whose working tree differs from the index and stages what it applies into the user's index (local probe, Git 2.53). `apply` runs the three-way apply against a temporary index built from the working tree, so it works over uncommitted changes and leaves the user's index alone. Conflicts are left as conflict markers in the working tree and reported with exit code 3; a diff that doesn't apply changes nothing.
