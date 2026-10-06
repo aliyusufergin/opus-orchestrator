@@ -5,6 +5,8 @@ Each directory is one scenario that [`fake_codex.py`](../../fake_codex.py) plays
 - `events.jsonl`: written to stdout, as `codex exec --json` does.
 - `last-message.json` (optional): written to the `--output-last-message` path. Without it, no final message is written.
 - `exit-code` (optional): the exit code, 0 when absent.
+- `edits.json` (optional): changes to the working directory, made before the events are written. `write` maps paths to their new text and `delete` lists paths to remove.
+- `hang-seconds` (optional): how long to wait after the events, before writing the final message.
 
 ## Where the outputs come from
 
@@ -15,6 +17,9 @@ The events are built from real `codex exec --json` output, recorded with Codex C
 | `read-only-done` | A recorded `codex exec` call with one command item (usage 24587 input, 18944 cached, 130 output) |
 | `read-only-blocked` | A recorded `codex exec` call with only a final message (usage 13661 input, 19 output) |
 | `no-result` | The recorded opening events, then a `turn.failed` event shaped after Codex's documented event types. No failure was recorded. |
+| `write-done`, `write-outside-scope` | The recorded framing, with a `file_change` item and token usage shaped after Codex's documented event types. No writing Delegation was recorded. |
+| `write-no-result` | As `write-done`, ending in the `turn.failed` event of `no-result` |
+| `write-hang` | As `write-done`, hanging before its final message |
 
 ## Model catalogs
 

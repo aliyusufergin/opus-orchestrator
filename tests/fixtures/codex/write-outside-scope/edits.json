@@ -1,0 +1,6 @@
+{
+  "write": {
+    "src/greet.py": "def greet(name):\n    return f\"Hello, {name}!\"\n",
+    "README.md": "# Demo\n\nCall greet() to greet someone.\n"
+  }
+}

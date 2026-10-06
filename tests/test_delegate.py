@@ -4,41 +4,13 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 from datetime import datetime
 from pathlib import Path
-from typing import IO, Any
 
-from support import FAKE_CODEX, PLUGIN_ROOT, SCENARIOS, WrapperTestCase, stdout_field
-
-TASK_PART = "# Goal\nFind where greet() is called.\n"
+from support import PLUGIN_ROOT, SCENARIOS, TASK_PART, WrapperTestCase, stdout_field
 
 
-class DelegationTestCase(WrapperTestCase):
-    def delegate(
-        self,
-        run_id: str,
-        *,
-        task: Path | None = None,
-        write_scope: str = "none",
-        scenario: str = "read-only-done",
-        stdin: int | IO[Any] | None = subprocess.DEVNULL,
-        codex: Path = FAKE_CODEX,
-    ) -> subprocess.CompletedProcess[str]:
-        return self.run_wrapper(
-            "delegate",
-            "--run", run_id,
-            "--task", str(task or self.write_task(TASK_PART)),
-            "--model", "gpt-6-luna",
-            "--effort", "medium",
-            "--write-scope", write_scope,
-            scenario=scenario,
-            stdin=stdin,
-            codex=codex,
-        )
-
-
-class ReadOnlyDelegationTest(DelegationTestCase):
+class ReadOnlyDelegationTest(WrapperTestCase):
     def test_runs_codex_exec_pinned_in_a_minimal_read_only_environment(self) -> None:
         run_id, _ = self.start_run()
 
@@ -168,7 +140,7 @@ class ReadOnlyDelegationTest(DelegationTestCase):
         self.assertEqual(len(stored), 1, "the JSONL events should be in the Run record")
 
 
-class DelegateExitCodeTest(DelegationTestCase):
+class DelegateExitCodeTest(WrapperTestCase):
     def test_exits_zero_for_a_blocked_result(self) -> None:
         run_id, _ = self.start_run()
 
@@ -207,13 +179,15 @@ class DelegateExitCodeTest(DelegationTestCase):
         self.assertIn("task part", completed.stderr)
         self.assertEqual(self.codex_calls(), [])
 
-    def test_refuses_a_write_scope_other_than_none_without_calling_codex(self) -> None:
+    def test_refuses_a_write_scope_that_isnt_inside_the_repository_without_calling_codex(self) -> None:
         run_id, _ = self.start_run()
 
-        completed = self.delegate(run_id, write_scope="src/")
+        for write_scope in (["../elsewhere"], [str(self.repo / "src")], ["none", "src/"], [""]):
+            with self.subTest(write_scope=write_scope):
+                completed = self.delegate(run_id, write_scope=write_scope)
 
-        self.assertNotEqual(completed.returncode, 0)
-        self.assertIn("Write scope", completed.stderr)
+                self.assertEqual(completed.returncode, 2, completed.stderr)
+                self.assertIn("Write scope", completed.stderr)
         self.assertEqual(self.codex_calls(), [])
 
     def test_fails_when_codex_returns_no_result(self) -> None:

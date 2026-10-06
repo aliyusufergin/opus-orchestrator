@@ -4,7 +4,8 @@
 It accepts the `codex exec` options of Codex CLI 0.159.2 and rejects anything
 else, reads stdin the way `codex exec` does (to end of file, so it hangs when
 stdin is left open), records what it received, with options under their long
-names, then plays back a scenario from tests/fixtures/codex.
+names and the files it found in its working directory, then plays back a
+scenario from tests/fixtures/codex.
 
 `codex debug models` prints a model catalog from tests/fixtures/codex/catalogs.
 
@@ -19,7 +20,9 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 from pathlib import Path
+from typing import Any
 
 # `codex exec --help`, Codex CLI 0.159.2.
 OPTIONS_WITH_VALUE = {
@@ -91,10 +94,30 @@ def debug_models(argv: list[str]) -> int:
             "positionals": [],
             "stdin": None,
             "cwd": os.getcwd(),
+            "files": {},
         }
     )
     sys.stdout.write(Path(os.environ["FAKE_CODEX_CATALOG"]).read_text())
     return 0
+
+
+def files_in(directory: Path) -> dict[str, str]:
+    """The text of every file under `directory`, Git's own files aside."""
+    return {
+        path.relative_to(directory).as_posix(): path.read_text(errors="replace")
+        for path in sorted(directory.rglob("*"))
+        if path.is_file() and ".git" not in path.relative_to(directory).parts
+    }
+
+
+def make_edits(directory: Path, edits: dict[str, Any]) -> None:
+    """Change files as a Delegate would: `write` maps paths to new text, `delete` lists paths."""
+    for name, text in edits.get("write", {}).items():
+        path = directory / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+    for name in edits.get("delete", []):
+        (directory / name).unlink()
 
 
 def main(argv: list[str]) -> int:
@@ -145,12 +168,20 @@ def main(argv: list[str]) -> int:
             "positionals": positionals,
             "stdin": stdin_text,
             "cwd": os.getcwd(),
+            "files": files_in(Path.cwd()),
         }
     )
 
     scenario = Path(os.environ["FAKE_CODEX_SCENARIO"])
+    edits = scenario / "edits.json"
+    if edits.exists():
+        make_edits(Path.cwd(), json.loads(edits.read_text()))
     sys.stdout.write((scenario / "events.jsonl").read_text())
     sys.stdout.flush()
+
+    hang = scenario / "hang-seconds"
+    if hang.exists():
+        time.sleep(float(hang.read_text()))
 
     last_message = scenario / "last-message.json"
     output_paths = options.get("--output-last-message", [])
