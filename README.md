@@ -2,7 +2,7 @@
 
 A Claude Code plugin in which a Claude Opus session, started by you for a task, hands bounded pieces of the work to OpenAI models through Codex and stays responsible for the outcome. The vocabulary is in [CONTEXT.md](CONTEXT.md) and the decisions are in [docs/adr](docs/adr).
 
-This is an early version. Its skill is a minimal pointer to the wrapper. The full skill will be written from measured gaps. Some wrapper invariants from [ADR 0001](docs/adr/0001-free-method-explicit-interface-invariants-in-code.md) and [ADR 0003](docs/adr/0003-cost-is-quota-concurrency-capped-astra-needs-permission.md) aren't enforced yet: there is no timeout, no limit of three concurrent Delegations, no rerun of a Contract's Checks, and no refusal of `ultra` effort or of models missing from Codex's catalog.
+This is an early version. Its skill is a minimal pointer to the wrapper. The full skill will be written from measured gaps. Some wrapper invariants from [ADR 0001](docs/adr/0001-free-method-explicit-interface-invariants-in-code.md) and [ADR 0003](docs/adr/0003-cost-is-quota-concurrency-capped-astra-needs-permission.md) aren't enforced yet: there is no timeout, no limit of three concurrent Delegations, and no rerun of a Contract's Checks.
 
 ## Requirements
 

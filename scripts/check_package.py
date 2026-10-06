@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Package checks: the plugin manifest, the marketplace entry, the orchestrate
-skill's frontmatter, the Result schema and local Markdown links.
+skill's frontmatter, the Model notes date, the Result schema and local Markdown links.
 
 Prints each failure and exits 1 if there is any.
 """
@@ -12,6 +12,7 @@ import os
 import re
 import subprocess
 import sys
+from datetime import date
 from pathlib import Path
 from typing import Any, Callable
 
@@ -23,6 +24,7 @@ MARKETPLACE = REPO_ROOT / ".claude-plugin" / "marketplace.json"
 PLUGIN_ROOT = REPO_ROOT / "plugins" / "opus-orchestrator"
 PLUGIN_MANIFEST = PLUGIN_ROOT / ".claude-plugin" / "plugin.json"
 SKILL = PLUGIN_ROOT / "skills" / "orchestrate" / "SKILL.md"
+MODEL_NOTES = PLUGIN_ROOT / "skills" / "orchestrate" / "model-notes.md"
 WRAPPER = PLUGIN_ROOT / "scripts" / "orchestrator.py"
 RESULT_SCHEMA = PLUGIN_ROOT / "schemas" / "result.schema.json"
 
@@ -115,6 +117,16 @@ def check_skill() -> list[str]:
     return problems
 
 
+def check_model_notes() -> list[str]:
+    """The wrapper's freshness check needs a `date` it can parse."""
+    fields, _ = frontmatter(MODEL_NOTES)
+    try:
+        date.fromisoformat(fields.get("date", ""))
+    except ValueError:
+        return [f"model-notes.md: the frontmatter needs date: YYYY-MM-DD, not {fields.get('date')!r}"]
+    return []
+
+
 def check_result_schema() -> list[str]:
     schema = load_json(RESULT_SCHEMA)
     try:
@@ -192,6 +204,7 @@ CHECKS: list[tuple[str, Callable[[], list[str]]]] = [
     ("plugin manifest", check_plugin_manifest),
     ("marketplace entry", check_marketplace),
     ("orchestrate skill", check_skill),
+    ("Model notes date", check_model_notes),
     ("Result schema", check_result_schema),
     ("local Markdown links", check_markdown_links),
 ]
