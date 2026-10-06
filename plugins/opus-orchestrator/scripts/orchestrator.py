@@ -5,6 +5,7 @@ Commands:
   start-run  create a Run record and print the Run id
   delegate   run one Delegation through Codex and write its Result
   apply      apply a writing Delegation's diff to the working tree with a three-way apply
+  report     print one line per Delegation of a Run, with token totals per model
 """
 
 from __future__ import annotations
@@ -132,6 +133,15 @@ def new_delegation(run_dir: Path) -> Path:
     delegations = run_dir / "delegations"
     taken = len(list(delegations.iterdir())) if delegations.exists() else 0
     return create_first_free(delegations, (f"d{n}" for n in itertools.count(taken + 1)))
+
+
+def delegations_in_order(run_dir: Path) -> list[Path]:
+    """The Run's Delegation directories, d1, d2, ... in the order they were started."""
+    delegations = run_dir / "delegations"
+    if not delegations.is_dir():
+        return []
+    found = [p for p in delegations.iterdir() if p.is_dir() and p.name[1:].isdigit()]
+    return sorted(found, key=lambda p: int(p.name[1:]))
 
 
 def parse_write_scope(values: list[str]) -> list[str] | None:
@@ -303,7 +313,7 @@ def delegate(args: argparse.Namespace) -> int:
             changes = collect_changes(worktree, snapshot, write_scope, delegation_dir)
     duration = time.monotonic() - started
 
-    result = read_result(last_message)
+    result = read_json_object(last_message)  # The Delegate's final message.
     if result is None:
         raise WrapperError(
             f"Codex returned no Result (exit code {codex.returncode}); "
@@ -347,13 +357,22 @@ def run_codex(
             ) from None
 
 
-def read_result(last_message: Path) -> dict[str, Any] | None:
-    """The Delegate's final message, if it is a JSON object."""
+def read_json_object(path: Path) -> dict[str, Any] | None:
+    """The file's content, if it is a JSON object."""
     try:
-        result = json.loads(last_message.read_text())
+        data = json.loads(path.read_text())
     except (OSError, ValueError):
         return None
-    return result if isinstance(result, dict) else None
+    return data if isinstance(data, dict) else None
+
+
+def add_usage(total: dict[str, int] | None, usage: dict[str, Any]) -> dict[str, int]:
+    """`total` with the token counts in `usage` added; non-integer counts count as zero."""
+    total = total or dict.fromkeys(USAGE_FIELDS, 0)
+    for field in USAGE_FIELDS:
+        count = usage.get(field)
+        total[field] += count if isinstance(count, int) else 0
+    return total
 
 
 def read_events(events_path: Path) -> tuple[str | None, dict[str, int] | None]:
@@ -370,21 +389,21 @@ def read_events(events_path: Path) -> tuple[str | None, dict[str, int] | None]:
         if event.get("type") == "thread.started" and thread_id is None:
             thread_id = event.get("thread_id")
         elif event.get("type") == "turn.completed" and isinstance(event.get("usage"), dict):
-            usage = usage or dict.fromkeys(USAGE_FIELDS, 0)
-            for field in USAGE_FIELDS:
-                count = event["usage"].get(field)
-                usage[field] += count if isinstance(count, int) else 0
+            usage = add_usage(usage, event["usage"])
     return thread_id, usage
 
 
-def print_summary(result_path: Path, result: dict[str, Any], evidence: dict[str, Any]) -> None:
-    usage = evidence["usage"]
-    tokens = (
+def format_tokens(usage: dict[str, int] | None) -> str:
+    if not usage:
+        return "not reported"
+    return (
         f"{usage['input_tokens']} input ({usage['cached_input_tokens']} cached), "
         f"{usage['output_tokens']} output ({usage['reasoning_output_tokens']} reasoning)"
-        if usage
-        else "not reported"
     )
+
+
+def print_summary(result_path: Path, result: dict[str, Any], evidence: dict[str, Any]) -> None:
+    tokens = format_tokens(evidence["usage"])
     summary = " ".join(str(result.get("summary", "")).split())
     if len(summary) > SUMMARY_LIMIT:
         summary = summary[: SUMMARY_LIMIT - 1] + "…"
@@ -399,6 +418,53 @@ def print_summary(result_path: Path, result: dict[str, Any], evidence: dict[str,
         print(f"Changed paths: {len(evidence['changed_paths'])}")
         print(f"Outside Write scope: {', '.join(evidence['outside_write_scope']) or 'none'}")
     print(f"Summary: {summary}")
+
+
+def astra_mark(model: str) -> str:
+    # Astra needs the user's permission, so every Astra Delegation stands out (ADR 0003).
+    return "  ASTRA" if "astra" in model.lower() else ""
+
+
+def format_seconds(seconds: Any) -> str:
+    return f"{seconds:.1f} s" if isinstance(seconds, (int, float)) else "not recorded"
+
+
+def report(args: argparse.Namespace) -> int:
+    run_dir = run_record(Path.cwd(), args.run)
+    delegation_dirs = delegations_in_order(run_dir)
+    print(f"Run {args.run}: " + (f"{len(delegation_dirs)} Delegations" if delegation_dirs else "no Delegations"))
+
+    # Per model: Delegation count and summed usage, None while no Delegation reported usage.
+    totals: dict[str, tuple[int, dict[str, int] | None]] = {}
+    for delegation_dir in delegation_dirs:
+        evidence = read_json_object(delegation_dir / "evidence.json")
+        if evidence is None:
+            print(f"{delegation_dir.name}  no evidence: still running, or the wrapper failed")
+            continue
+        model = str(evidence.get("model"))
+        result = read_json_object(delegation_dir / "result.json")
+        status = str(result.get("status")) if result else "no Result"
+        if evidence.get("failure_kind"):
+            status += f" ({evidence['failure_kind']})"
+        usage = evidence.get("usage")
+        print(
+            f"{delegation_dir.name}  {model}{astra_mark(model)}  "
+            f"effort {evidence.get('effort')}  {status}  "
+            f"tokens {format_tokens(usage)}  "
+            f"waited {format_seconds(evidence.get('wait_seconds'))}, "
+            f"ran {format_seconds(evidence.get('duration_seconds'))}"
+        )
+        count, summed = totals.get(model, (0, None))
+        totals[model] = (count + 1, add_usage(summed, usage) if isinstance(usage, dict) else summed)
+
+    if totals:
+        print("Tokens per model:")
+    for model, (count, summed) in totals.items():
+        print(
+            f"  {model}: {format_tokens(summed)}, {count} Delegation{'' if count == 1 else 's'}"
+            f"{astra_mark(model)}"
+        )
+    return 0
 
 
 def three_way_apply(toplevel: Path, diff: Path) -> list[str]:
@@ -461,6 +527,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     apply_command.add_argument("--run", required=True, help="the Run id from start-run")
     apply_command.add_argument("--delegation", required=True, help="the Delegation id from delegate")
     apply_command.set_defaults(handler=apply)
+
+    report_command = commands.add_parser("report", help="print one line per Delegation of a Run")
+    report_command.add_argument("--run", required=True, help="the Run id from start-run")
+    report_command.set_defaults(handler=report)
 
     return parser.parse_args(argv)
 
