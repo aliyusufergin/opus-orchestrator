@@ -22,6 +22,8 @@ SCENARIOS = TESTS_DIR / "fixtures" / "codex"
 # Keeps a test that waits on a hung process from hanging the suite.
 WRAPPER_TIMEOUT_SECONDS = 30
 
+TASK_PART = "# Goal\nFind where greet() is called.\n"
+
 @dataclass
 class CodexCall:
     """What the fake Codex received in one invocation."""
@@ -33,6 +35,7 @@ class CodexCall:
     positionals: list[str]
     stdin: str | None
     cwd: str
+    files: dict[str, str]  # Every file in its working directory, by relative path, Git's aside.
 
     def option(self, name: str) -> str | None:
         values = self.options.get(name, [])
@@ -98,19 +101,23 @@ class WrapperTestCase(unittest.TestCase):
         codex: Path = FAKE_CODEX,
         stdin: int | IO[Any] | None = subprocess.DEVNULL,
     ) -> subprocess.CompletedProcess[str]:
-        env = isolated_env()
-        env["FAKE_CODEX_SCENARIO"] = str(SCENARIOS / scenario)
-        env["FAKE_CODEX_RECORD"] = str(self.codex_records)
-        env["OPUS_ORCHESTRATOR_CODEX"] = str(codex)
         return subprocess.run(
             [str(WRAPPER), *args],
             cwd=cwd or self.repo,
-            env=env,
+            env=self.wrapper_env(scenario, codex),
             stdin=stdin,
             capture_output=True,
             text=True,
             timeout=WRAPPER_TIMEOUT_SECONDS,
         )
+
+    def wrapper_env(self, scenario: str = "read-only-done", codex: Path = FAKE_CODEX) -> dict[str, str]:
+        """The environment the wrapper runs in, with the fake Codex playing `scenario`."""
+        env = isolated_env()
+        env["FAKE_CODEX_SCENARIO"] = str(SCENARIOS / scenario)
+        env["FAKE_CODEX_RECORD"] = str(self.codex_records)
+        env["OPUS_ORCHESTRATOR_CODEX"] = str(codex)
+        return env
 
     def start_run(self) -> tuple[str, Path]:
         """Start a Run and return its id and Run record directory."""
@@ -119,6 +126,35 @@ class WrapperTestCase(unittest.TestCase):
         return stdout_field(completed.stdout, "Run id"), Path(
             stdout_field(completed.stdout, "Run record")
         )
+
+    def delegate(
+        self,
+        run_id: str,
+        *,
+        task: Path | None = None,
+        write_scope: list[str] | None = None,
+        scenario: str = "read-only-done",
+        stdin: int | IO[Any] | None = subprocess.DEVNULL,
+        codex: Path = FAKE_CODEX,
+    ) -> subprocess.CompletedProcess[str]:
+        return self.run_wrapper(
+            *self.delegate_args(run_id, task=task, write_scope=write_scope),
+            scenario=scenario,
+            stdin=stdin,
+            codex=codex,
+        )
+
+    def delegate_args(
+        self, run_id: str, *, task: Path | None = None, write_scope: list[str] | None = None
+    ) -> list[str]:
+        return [
+            "delegate",
+            "--run", run_id,
+            "--task", str(task or self.write_task(TASK_PART)),
+            "--model", "gpt-6-luna",
+            "--effort", "medium",
+            "--write-scope", *(write_scope or ["none"]),
+        ]
 
     def write_task(self, text: str) -> Path:
         task = self.tmp / "task.md"
@@ -137,6 +173,44 @@ class WrapperTestCase(unittest.TestCase):
         calls = self.codex_calls()
         self.assertEqual(len(calls), 1, "expected exactly one Codex invocation")
         return calls[0]
+
+
+# src/greet.py before and after the writing scenarios, and the file they add.
+GREET = 'def greet(name):\n    return f"Hello, {name}"\n'
+NEW_GREET = 'def greet(name):\n    return f"Hello, {name}!"\n'
+FAREWELL = 'def farewell(name):\n    return f"Goodbye, {name}!"\n'
+
+
+class WritingDelegationTestCase(WrapperTestCase):
+    """A repository with the small `src/` package the writing scenarios change."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        (self.repo / "src").mkdir()
+        (self.repo / "src" / "greet.py").write_text(GREET)
+        (self.repo / "src" / "old.py").write_text("UNUSED = True\n")
+        git(self.repo, "add", "src")
+        git(self.repo, "commit", "--quiet", "--message", "Add src")
+
+    def evidence(self, completed: subprocess.CompletedProcess[str]) -> dict[str, Any]:
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        result_path = Path(stdout_field(completed.stdout, "Result"))
+        evidence: dict[str, Any] = json.loads((result_path.parent / "evidence.json").read_text())
+        return evidence
+
+    def files(self) -> dict[str, str]:
+        """The main working tree's files, Git's own aside."""
+        return {
+            path.relative_to(self.repo).as_posix(): path.read_text()
+            for path in sorted(self.repo.rglob("*"))
+            if path.is_file() and ".git" not in path.relative_to(self.repo).parts
+        }
+
+    def worktrees(self) -> list[str]:
+        """Paths of the repository's worktrees other than the main one."""
+        listing = git(self.repo, "worktree", "list", "--porcelain")
+        paths = [line.removeprefix("worktree ") for line in listing.splitlines() if line.startswith("worktree ")]
+        return [path for path in paths if Path(path) != self.repo]
 
 
 def stdout_field(stdout: str, label: str) -> str:

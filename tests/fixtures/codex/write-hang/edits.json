@@ -1,0 +1,9 @@
+{
+  "write": {
+    "src/greet.py": "def greet(name):\n    return f\"Hello, {name}!\"\n",
+    "src/farewell.py": "def farewell(name):\n    return f\"Goodbye, {name}!\"\n"
+  },
+  "delete": [
+    "src/old.py"
+  ]
+}
