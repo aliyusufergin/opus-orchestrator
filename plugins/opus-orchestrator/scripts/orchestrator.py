@@ -46,7 +46,7 @@ MODEL_NOTES_MAX_AGE_DAYS = 30
 # A Delegation that runs longer is stopped (ADR 0001); the Orchestrator may raise it up to the limit.
 DEFAULT_TIMEOUT_MINUTES = 20
 MAX_TIMEOUT_MINUTES = 60
-# Plus Quota belongs to the account, so the cap holds across every Run and repository (ADR 0003).
+# ChatGPT Quota belongs to the account, so the cap holds across every Run and repository (ADR 0003).
 MAX_CONCURRENT_DELEGATIONS = 3
 # How often a Delegation waiting for a slot tries again.
 SLOT_POLL_SECONDS = 0.1

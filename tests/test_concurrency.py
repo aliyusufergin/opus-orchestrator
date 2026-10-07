@@ -13,6 +13,8 @@ from support import WRAPPER, WRAPPER_TIMEOUT_SECONDS, CodexCall, WritingDelegati
 
 # How long the test waits for the wrappers it started in the background to reach Codex.
 START_DEADLINE_SECONDS = 10
+# Above it, a Delegation waited for a slot; the slow scenario holds one for two seconds.
+WAITED_SECONDS = 0.5
 
 
 class ConcurrencyTestCase(WritingDelegationTestCase):
@@ -30,7 +32,7 @@ class ConcurrencyTestCase(WritingDelegationTestCase):
                 stderr=subprocess.PIPE,
                 text=True,
             )
-            self.addCleanup(end, wrapper)
+            self.addCleanup(end_wrapper, wrapper)
             wrappers.append(wrapper)
         deadline = time.monotonic() + START_DEADLINE_SECONDS
         while len(self.codex_calls()) < count:
@@ -53,7 +55,7 @@ class ConcurrencyTestCase(WritingDelegationTestCase):
         return stdout_field(completed.stdout, "Run id")
 
 
-def end(wrapper: subprocess.Popen[str]) -> None:
+def end_wrapper(wrapper: subprocess.Popen[str]) -> None:
     if wrapper.poll() is None:
         wrapper.kill()
     wrapper.communicate()
@@ -66,14 +68,14 @@ class DelegationSlotTest(ConcurrencyTestCase):
 
         evidence = self.evidence(self.delegate(run_id))
 
-        *held, fourth = sorted(self.codex_calls(), key=started_at)
-        self.assertGreaterEqual(started_at(fourth), min(call.ended_at or float("inf") for call in held))
+        *held, fourth = sorted(self.codex_calls(), key=start_time)
+        self.assertGreaterEqual(start_time(fourth), min(call.ended_at or float("inf") for call in held))
         self.assertIsInstance(evidence["wait_seconds"], float)
-        self.assertGreater(evidence["wait_seconds"], 0.5)
+        self.assertGreater(evidence["wait_seconds"], WAITED_SECONDS)
         for holder in holders:
             stdout, stderr = holder.communicate(timeout=WRAPPER_TIMEOUT_SECONDS)
             self.assertEqual(holder.returncode, 0, stderr)
-            self.assertLess(json.loads(evidence_path(stdout).read_text())["wait_seconds"], 0.5)
+            self.assertLess(json.loads(evidence_path(stdout).read_text())["wait_seconds"], WAITED_SECONDS)
 
     def test_slots_are_shared_across_repositories(self) -> None:
         self.start_delegations(3, "read-only-slow")
@@ -84,16 +86,16 @@ class DelegationSlotTest(ConcurrencyTestCase):
 
         completed = self.run_wrapper(*self.delegate_args(run_id), cwd=other)
 
-        self.assertGreater(self.evidence(completed)["wait_seconds"], 0.5)
+        self.assertGreater(self.evidence(completed)["wait_seconds"], WAITED_SECONDS)
 
     def test_the_timeout_counts_from_when_codex_starts(self) -> None:
         self.start_delegations(3, "read-only-slow")
         run_id, _ = self.start_run()
 
-        # 1.2 s: shorter than the wait for a slot, longer than the fake Codex takes.
-        evidence = self.evidence(self.delegate(run_id, timeout="0.02"))
+        # 0.6 s: shorter than the wait for a slot, longer than the fake Codex takes.
+        evidence = self.evidence(self.delegate(run_id, timeout="0.01"))
 
-        self.assertGreater(evidence["wait_seconds"], 1.2)
+        self.assertGreater(evidence["wait_seconds"], 0.6)
         self.assertIsNone(evidence["failure_kind"])
 
     def test_a_killed_wrapper_does_not_leak_its_slot(self) -> None:
@@ -106,10 +108,10 @@ class DelegationSlotTest(ConcurrencyTestCase):
 
         evidence = self.evidence(self.delegate(run_id))
 
-        self.assertLess(evidence["wait_seconds"], 0.5)
+        self.assertLess(evidence["wait_seconds"], WAITED_SECONDS)
 
 
-def started_at(call: CodexCall) -> float:
+def start_time(call: CodexCall) -> float:
     assert call.started_at is not None
     return call.started_at
 
