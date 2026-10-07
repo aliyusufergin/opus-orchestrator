@@ -5,7 +5,8 @@ It accepts the `codex exec` options of Codex CLI 0.159.2 and rejects anything
 else, reads stdin the way `codex exec` does (to end of file, so it hangs when
 stdin is left open), records what it received, with options under their long
 names and the files it found in its working directory, then plays back a
-scenario from tests/fixtures/codex.
+scenario from tests/fixtures/codex. The record gives the times it started and,
+once the scenario is played, ended.
 
 `codex debug models` prints a model catalog from tests/fixtures/codex/catalogs.
 
@@ -121,6 +122,7 @@ def make_edits(directory: Path, edits: dict[str, Any]) -> None:
 
 
 def main(argv: list[str]) -> int:
+    started_at = time.time()
     if argv[:2] == ["debug", "models"]:
         return debug_models(argv[2:])
     if argv[:1] != ["exec"]:
@@ -159,18 +161,19 @@ def main(argv: list[str]) -> int:
             print("Reading additional input from stdin...", file=sys.stderr)
         stdin_text = sys.stdin.read()
 
-    record(
-        {
-            "argv": argv,
-            "subcommand": argv[0],
-            "options": options,
-            "flags": flags,
-            "positionals": positionals,
-            "stdin": stdin_text,
-            "cwd": os.getcwd(),
-            "files": files_in(Path.cwd()),
-        }
-    )
+    invocation: dict[str, object] = {
+        "argv": argv,
+        "subcommand": argv[0],
+        "options": options,
+        "flags": flags,
+        "positionals": positionals,
+        "stdin": stdin_text,
+        "cwd": os.getcwd(),
+        "files": files_in(Path.cwd()),
+        "pid": os.getpid(),
+        "started_at": started_at,
+    }
+    record(invocation)
 
     scenario = Path(os.environ["FAKE_CODEX_SCENARIO"])
     edits = scenario / "edits.json"
@@ -188,6 +191,7 @@ def main(argv: list[str]) -> int:
     if last_message.exists() and output_paths:
         Path(output_paths[-1]).write_text(last_message.read_text())
 
+    record({**invocation, "ended_at": time.time()})
     exit_code = scenario / "exit-code"
     return int(exit_code.read_text()) if exit_code.exists() else 0
 

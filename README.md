@@ -2,7 +2,7 @@
 
 A Claude Code plugin in which a Claude Opus session, started by you for a task, hands bounded pieces of the work to OpenAI models through Codex and stays responsible for the outcome. The vocabulary is in [CONTEXT.md](CONTEXT.md) and the decisions are in [docs/adr](docs/adr).
 
-This is an early version. Its skill is a minimal pointer to the wrapper. The full skill will be written from measured gaps. One wrapper invariant from [ADR 0003](docs/adr/0003-cost-is-quota-concurrency-capped-astra-needs-permission.md) isn't enforced yet: there is no limit of three concurrent Delegations.
+This is an early version. Its skill is a minimal pointer to the wrapper. The full skill will be written from measured gaps.
 
 ## Requirements
 
@@ -34,6 +34,8 @@ Only you can start a Run: Claude never invokes the skill on its own. `--allow-as
 Starting the skill creates a Run record in `.git/opus-orchestrator/runs/<Run id>/`, inside the repository's Git directory, so it is never tracked. Each Delegation leaves a folder there with its full Contract, Codex's JSONL events, the Result and the wrapper's evidence, and for a writing Delegation its diff and the output of each Check the wrapper reran.
 
 A writing Delegation runs in a Git worktree in the system's temporary directory, made from a Snapshot of your working tree: an unreferenced commit recorded through a temporary index, so your index, HEAD and branches stay as they are. The worktree is removed when the Delegation ends, also when it fails or the wrapper is stopped.
+
+At most three Delegations run Codex at once on the machine, across every Run and repository, because the ChatGPT Quota belongs to your account ([ADR 0003](docs/adr/0003-cost-is-quota-concurrency-capped-astra-needs-permission.md)). A further Delegation waits for a slot; its waiting time is in its evidence and doesn't count towards its timeout. The slots are locks on files in `~/.cache/opus-orchestrator/slots/` (or under `$XDG_CACHE_HOME`), so a slot is released when its wrapper exits, even when it is killed.
 
 ## What a Run sends to OpenAI
 

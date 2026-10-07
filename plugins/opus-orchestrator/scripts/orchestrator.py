@@ -11,6 +11,7 @@ Commands:
 from __future__ import annotations
 
 import argparse
+import fcntl
 import itertools
 import json
 import os
@@ -26,7 +27,7 @@ import time
 from contextlib import contextmanager
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import IO, Any, Iterable, Iterator
+from typing import IO, Any, Iterable, Iterator, NamedTuple
 
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 FIXED_PART = PLUGIN_ROOT / "contract" / "fixed-part.md"
@@ -37,12 +38,18 @@ MODEL_NOTES = PLUGIN_ROOT / "skills" / "orchestrate" / "model-notes.md"
 CODEX_ENV = "OPUS_ORCHESTRATOR_CODEX"
 # Replaces the Model notes, so tests can date them.
 MODEL_NOTES_ENV = "OPUS_ORCHESTRATOR_MODEL_NOTES"
+# Replaces the machine's directory of Delegation slots, so tests get their own.
+SLOTS_ENV = "OPUS_ORCHESTRATOR_SLOTS"
 
 # Older notes may no longer match the catalog or the models' measured strengths.
 MODEL_NOTES_MAX_AGE_DAYS = 30
 # A Delegation that runs longer is stopped (ADR 0001); the Orchestrator may raise it up to the limit.
 DEFAULT_TIMEOUT_MINUTES = 20
 MAX_TIMEOUT_MINUTES = 60
+# Plus Quota belongs to the account, so the cap holds across every Run and repository (ADR 0003).
+MAX_CONCURRENT_DELEGATIONS = 3
+# How often a Delegation waiting for a slot tries again.
+SLOT_POLL_SECONDS = 0.1
 # How long a stopped process group gets to exit before it is killed.
 STOP_GRACE_SECONDS = 5
 # `ultra` is xhigh plus automatic subagent delegation, which Delegates never get (ADR 0001).
@@ -477,26 +484,26 @@ def delegate(args: argparse.Namespace) -> int:
     events_path = delegation_dir / "events.jsonl"
 
     timeout = timeout_minutes * 60
-    started_at, started = now(), time.monotonic()
+    queued_at = now()
     if write_scope is None:
         command = codex_command(args, None, toplevel, last_message)
-        exit_code = run_codex(command, contract, toplevel, events_path, timeout)
+        codex = run_codex(command, contract, toplevel, events_path, timeout)
         changes = dict.fromkeys(("snapshot", "diff", "changed_paths", "outside_write_scope"))
         check_reruns = None
     else:
         snapshot = take_snapshot(toplevel)
         with snapshot_worktree(toplevel, snapshot, f"{args.run}-{delegation_id}") as worktree:
             command = codex_command(args, write_scope, worktree, last_message)
-            exit_code = run_codex(command, contract, worktree, events_path, timeout)
+            codex = run_codex(command, contract, worktree, events_path, timeout)
             # After the diff is taken, so that what a Check builds stays out of it.
             changes = collect_changes(worktree, snapshot, write_scope, delegation_dir)
             check_reruns = rerun_checks(args.check, worktree, delegation_dir, timeout)
-    duration = time.monotonic() - started
+    duration = time.monotonic() - codex.started
 
     thread_id, usage, errors = read_events(events_path)
     result, result_problem = read_result(last_message)
     failure_kind, failure_message = None, None
-    failure = classify_failure(exit_code, timeout_minutes, errors, result_problem)
+    failure = classify_failure(codex.exit_code, timeout_minutes, errors, result_problem)
     if failure is not None or result is None:
         failure_kind, failure_message = failure or ("invalid_result", str(result_problem))
         # The Delegate's own message stays in last-message.txt.
@@ -508,12 +515,14 @@ def delegate(args: argparse.Namespace) -> int:
         "effort": args.effort,
         "write_scope": "none" if write_scope is None else write_scope,
         "timeout_minutes": timeout_minutes,
-        "started_at": started_at,
+        "queued_at": queued_at,
+        "wait_seconds": round(codex.wait_seconds, 3),
+        "started_at": codex.started_at,
         "ended_at": now(),
         "duration_seconds": round(duration, 3),
         "thread_id": thread_id,
         "usage": usage,
-        "codex_exit_code": exit_code,
+        "codex_exit_code": codex.exit_code,
         "failure_kind": failure_kind,
         "failure": failure_message,
         **changes,
@@ -660,25 +669,79 @@ def wrapper_result(failure_kind: str, failure: str, changed_paths: list[str] | N
     }
 
 
+def slots_dir() -> Path:
+    if os.environ.get(SLOTS_ENV):
+        return Path(os.environ[SLOTS_ENV])
+    cache = os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache"
+    return Path(cache) / "opus-orchestrator" / "slots"
+
+
+def try_slot(directory: Path) -> IO[bytes] | None:
+    """Lock a free slot file and return it open, or None while every slot is taken."""
+    for number in range(1, MAX_CONCURRENT_DELEGATIONS + 1):
+        slot = open(directory / f"slot-{number}.lock", "ab")
+        try:
+            fcntl.flock(slot, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            slot.close()
+            continue
+        return slot
+    return None
+
+
+@contextmanager
+def delegation_slot() -> Iterator[float]:
+    """Hold one of the machine's Delegation slots, waiting for one if need be; yields the seconds waited.
+
+    A slot is a lock on a file, so it is released when the wrapper exits, however it exits. Codex
+    doesn't inherit the lock, so a Codex left behind by a killed wrapper doesn't keep the slot.
+    """
+    directory = slots_dir()
+    directory.mkdir(parents=True, exist_ok=True)
+    queued = time.monotonic()
+    slot = try_slot(directory)
+    if slot is None:
+        print(
+            f"Waiting for a slot: {MAX_CONCURRENT_DELEGATIONS} Delegations are running on this machine",
+            file=sys.stderr,
+            flush=True,
+        )
+    while slot is None:
+        time.sleep(SLOT_POLL_SECONDS)
+        slot = try_slot(directory)
+    with slot:
+        yield time.monotonic() - queued
+
+
+class CodexRun(NamedTuple):
+    exit_code: int | None  # None when Codex ran past its timeout and was stopped.
+    wait_seconds: float  # Spent waiting for a Delegation slot.
+    started_at: str
+    started: float  # time.monotonic() when Codex started.
+
+
 def run_codex(
     command: list[str], contract: str, workdir: Path, events_path: Path, timeout: float
-) -> int | None:
-    """Run Codex with the Contract on stdin, its events and stderr going to the Run record.
+) -> CodexRun:
+    """Run Codex in a Delegation slot with the Contract on stdin, its events and stderr going to the Run record.
 
-    Returns its exit code, or None when it ran past `timeout` seconds and was stopped.
+    The `timeout` in seconds counts from when Codex starts, not from when the wait for a slot began.
     """
     with (
+        delegation_slot() as wait_seconds,
         open(events_path, "wb") as events,
         open(events_path.parent / "codex-stderr.log", "wb") as stderr,
     ):
+        started_at, started = now(), time.monotonic()
         try:
-            return run_process_group(
+            exit_code = run_process_group(
                 command, timeout, cwd=workdir, input=contract.encode(), stdout=events, stderr=stderr
             )
         except OSError as error:
             raise WrapperError(
                 f"cannot run Codex ({command[0]}): {error.strerror}; set {CODEX_ENV} to its path"
             ) from None
+    return CodexRun(exit_code, wait_seconds, started_at, started)
 
 
 def run_process_group(
