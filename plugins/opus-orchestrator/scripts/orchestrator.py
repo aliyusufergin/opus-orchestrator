@@ -366,9 +366,22 @@ def take_snapshot(toplevel: Path) -> str:
 
 
 @contextmanager
-def snapshot_worktree(toplevel: Path, snapshot: str, name: str) -> Iterator[Path]:
-    """A worktree outside the repository with the Snapshot checked out, removed afterwards whatever happens."""
-    worktree = Path(tempfile.mkdtemp(prefix=f"opus-orchestrator-{name}-")).resolve()
+def snapshot_worktree(
+    toplevel: Path, snapshot: str, name: str, *, at: Path | None = None, changes: Path | None = None
+) -> Iterator[Path]:
+    """A worktree outside the repository with the Snapshot checked out, removed afterwards whatever happens.
+
+    It is made `at` a given path that must not exist, or else at a new temporary one, and holds
+    the `changes` diff on top of the Snapshot when one is given.
+    """
+    if at is None:
+        worktree = Path(tempfile.mkdtemp(prefix=f"opus-orchestrator-{name}-")).resolve()
+    else:
+        try:
+            at.mkdir(mode=0o700)
+        except OSError as error:
+            raise WrapperError(f"cannot make the worktree at {at} again: {error.strerror}") from None
+        worktree = at
     try:
         # No hooks: a post-checkout hook has no business running in a Delegate's worktree.
         git(
@@ -376,6 +389,9 @@ def snapshot_worktree(toplevel: Path, snapshot: str, name: str) -> Iterator[Path
             "-c", f"core.hooksPath={os.devnull}",
             "worktree", "add", "--detach", "--quiet", str(worktree), snapshot,
         )
+        if changes is not None and changes.stat().st_size:
+            # To the files only, as the Delegate left them; the user's whitespace settings don't apply.
+            git(worktree, "apply", "--whitespace=nowarn", str(changes))
         yield worktree
     finally:
         removed = subprocess.run(
@@ -428,8 +444,13 @@ def sandbox_options(write_scope: list[str] | None) -> list[str]:
 
 
 def codex_command(
-    args: argparse.Namespace, write_scope: list[str] | None, workdir: Path, last_message: Path
+    args: argparse.Namespace,
+    write_scope: list[str] | None,
+    workdir: Path,
+    last_message: Path,
+    thread_id: str | None = None,
 ) -> list[str]:
+    """`codex exec`, or with a `thread_id`, `codex exec resume` continuing that session."""
     return [
         codex_executable(),
         "exec",
@@ -446,7 +467,9 @@ def codex_command(
         "--output-schema", str(RESULT_SCHEMA),
         "--output-last-message", str(last_message),
         "--cd", str(workdir),
-        "-",  # The Contract comes on stdin.
+        # `resume` comes after the options: it doesn't take --sandbox or --cd itself.
+        *(["resume", thread_id] if thread_id else []),
+        "-",  # The Contract, or a resumed Delegation's task part, comes on stdin.
     ]
 
 
@@ -459,16 +482,64 @@ def check_timeout(minutes: float) -> float:
     return minutes
 
 
+def resumed_delegation(run_dir: Path, args: argparse.Namespace) -> dict[str, Any]:
+    """The evidence of the earlier Delegation that `--resume` names."""
+    given = [
+        option
+        for option, value in (("--model", args.model), ("--effort", args.effort), ("--write-scope", args.write_scope))
+        if value is not None
+    ]
+    if given:
+        raise WrapperError(
+            f"a resumed Delegation keeps the model, effort and Write scope of {args.resume}; "
+            f"drop {', '.join(given)}",
+            EXIT_USAGE,
+        )
+    evidence = (
+        read_json_object(run_dir / "delegations" / args.resume / "evidence.json")
+        if is_plain_name(args.resume)
+        else None
+    )
+    if evidence is None:
+        raise WrapperError(f"no Delegation {args.resume!r} in Run {args.run} to resume", EXIT_USAGE)
+    if not isinstance(evidence.get("thread_id"), str):
+        raise WrapperError(f"Delegation {args.resume} left no Codex session to resume", EXIT_USAGE)
+    if evidence.get("write_scope") == "none":
+        return evidence
+    worktree, diff = evidence.get("worktree"), evidence.get("diff")
+    if not isinstance(worktree, str) or not isinstance(diff, str) or not Path(diff).is_file():
+        raise WrapperError(f"Delegation {args.resume} left no worktree and diff to resume from", EXIT_USAGE)
+    # Checked before the new Delegation starts; the worktree is made at the path only later.
+    if Path(worktree).exists():
+        raise WrapperError(
+            f"cannot resume {args.resume}: its worktree path {worktree} is taken, "
+            "perhaps by a resume of it still running",
+            EXIT_USAGE,
+        )
+    return evidence
+
+
 def delegate(args: argparse.Namespace) -> int:
-    write_scope = parse_write_scope(args.write_scope)
+    cwd = Path.cwd()
+    run_dir = run_record(cwd, args.run)
+    resumed = resumed_delegation(run_dir, args) if args.resume else None
+    if resumed is not None:
+        args.model, args.effort = resumed["model"], resumed["effort"]
+        scope = resumed["write_scope"]
+        write_scope = None if scope == "none" else parse_write_scope(scope)
+    elif None in (args.model, args.effort, args.write_scope):
+        raise WrapperError(
+            "delegate needs --model, --effort and --write-scope, unless --resume names an earlier Delegation",
+            EXIT_USAGE,
+        )
+    else:
+        write_scope = parse_write_scope(args.write_scope)
     timeout_minutes = check_timeout(args.timeout)
     if write_scope is None and args.check:
         raise WrapperError(
             "Checks are rerun only for a writing Delegation; a read-only one changes nothing to check",
             EXIT_USAGE,
         )
-    cwd = Path.cwd()
-    run_dir = run_record(cwd, args.run)
     try:
         task_part = Path(args.task).read_text()
     except OSError as error:
@@ -476,7 +547,9 @@ def delegate(args: argparse.Namespace) -> int:
     toplevel = Path(git(cwd, "rev-parse", "--show-toplevel"))
     check_model_and_effort(toplevel, args.model, args.effort)
 
-    contract = f"{FIXED_PART.read_text().rstrip()}\n\n{task_part}"
+    # A resumed Delegate already holds the fixed part, and the Contract it continues, in its session.
+    contract = task_part if resumed else f"{FIXED_PART.read_text().rstrip()}\n\n{task_part}"
+    thread_id = resumed["thread_id"] if resumed else None
     delegation_dir = new_delegation(run_dir)
     delegation_id = delegation_dir.name
     (delegation_dir / "contract.md").write_text(contract)
@@ -486,17 +559,28 @@ def delegate(args: argparse.Namespace) -> int:
     timeout = timeout_minutes * 60
     queued_at = now()
     if write_scope is None:
-        command = codex_command(args, None, toplevel, last_message)
+        command = codex_command(args, None, toplevel, last_message, thread_id)
         codex = run_codex(command, contract, toplevel, events_path, timeout)
-        changes = dict.fromkeys(("snapshot", "diff", "changed_paths", "outside_write_scope"))
+        changes = dict.fromkeys(("worktree", "snapshot", "diff", "changed_paths", "outside_write_scope"))
         check_reruns = None
     else:
-        snapshot = take_snapshot(toplevel)
-        with snapshot_worktree(toplevel, snapshot, f"{args.run}-{delegation_id}") as worktree:
-            command = codex_command(args, write_scope, worktree, last_message)
+        # A resumed Delegate continues where it stopped: in the same place, with its changes so far,
+        # and its diff still measured against the Snapshot it started from.
+        snapshot = resumed["snapshot"] if resumed else take_snapshot(toplevel)
+        with snapshot_worktree(
+            toplevel,
+            snapshot,
+            f"{args.run}-{delegation_id}",
+            at=Path(resumed["worktree"]) if resumed else None,
+            changes=Path(resumed["diff"]) if resumed else None,
+        ) as worktree:
+            command = codex_command(args, write_scope, worktree, last_message, thread_id)
             codex = run_codex(command, contract, worktree, events_path, timeout)
             # After the diff is taken, so that what a Check builds stays out of it.
-            changes = collect_changes(worktree, snapshot, write_scope, delegation_dir)
+            changes = {
+                "worktree": str(worktree),
+                **collect_changes(worktree, snapshot, write_scope, delegation_dir),
+            }
             check_reruns = rerun_checks(args.check, worktree, delegation_dir, timeout)
     duration = time.monotonic() - codex.started
 
@@ -511,6 +595,7 @@ def delegate(args: argparse.Namespace) -> int:
     evidence = {
         "run_id": args.run,
         "delegation_id": delegation_id,
+        "resumes": args.resume,
         "model": args.model,
         "effort": args.effort,
         "write_scope": "none" if write_scope is None else write_scope,
@@ -850,6 +935,8 @@ def print_summary(result_path: Path, result: dict[str, Any], evidence: dict[str,
         summary = summary[: SUMMARY_LIMIT - 1] + "…"
     print(f"Result: {result_path}")
     print(f"Delegation: {evidence['delegation_id']}")
+    if evidence["resumes"]:
+        print(f"Resumes: {evidence['resumes']}")
     print(f"Status: {result.get('status')}")
     print(f"Model: {evidence['model']}, effort {evidence['effort']}")
     if evidence["failure_kind"]:
@@ -890,6 +977,8 @@ def report(args: argparse.Namespace) -> int:
         status = str(result.get("status")) if result else "no Result"
         if evidence.get("failure_kind"):
             status += f" ({evidence['failure_kind']})"
+        if evidence.get("resumes"):
+            status += f"  resumes {evidence['resumes']}"
         usage = evidence.get("usage")
         print(
             f"{delegation_dir.name}  {model}{astra_mark(model)}  "
@@ -954,11 +1043,18 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     delegate_command = commands.add_parser("delegate", help="run one Delegation through Codex")
     delegate_command.add_argument("--run", required=True, help="the Run id from start-run")
     delegate_command.add_argument("--task", required=True, help="file holding the task part of the Contract")
-    delegate_command.add_argument("--model", required=True, help="Codex model, such as gpt-6.1-sol")
-    delegate_command.add_argument("--effort", required=True, help="reasoning effort, such as medium")
+    delegate_command.add_argument(
+        "--resume",
+        metavar="DELEGATION",
+        help=(
+            "an earlier Delegation of the Run whose Codex session the task part continues; "
+            "it keeps that Delegation's model, effort and Write scope"
+        ),
+    )
+    delegate_command.add_argument("--model", help="Codex model, such as gpt-6.1-sol")
+    delegate_command.add_argument("--effort", help="reasoning effort, such as medium")
     delegate_command.add_argument(
         "--write-scope",
-        required=True,
         nargs="+",
         metavar="PATH",
         help="repository-relative paths the Delegate may change, or `none` for a read-only Delegation",

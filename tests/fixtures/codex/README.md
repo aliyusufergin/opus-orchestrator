@@ -21,6 +21,8 @@ The events are built from real `codex exec --json` output, recorded with Codex C
 | `write-no-result` | As `write-done`, ending in the `turn.failed` event of `no-result` |
 | `write-hang` | As `write-done`, hanging before its final message |
 | `read-only-slow` | As `read-only-done`, waiting two seconds before its final message |
+| `no-thread` | Only an `error` event, shaped after Codex's documented event types: Codex failed before starting a session |
+| `write-followup` | As `write-done`, continuing its thread: a resumed Delegate's one further change |
 
 ## Codex error messages
 

@@ -1,0 +1,5 @@
+{
+  "write": {
+    "src/farewell.py": "def farewell(name):\n    return f\"Goodbye, {name}. See you!\"\n"
+  }
+}
