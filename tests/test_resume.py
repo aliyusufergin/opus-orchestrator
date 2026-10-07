@@ -17,9 +17,9 @@ from support import (
 )
 
 FOLLOW_UP = "# Follow-up\nAlso say where greet() is defined.\n"
-FOLLOWED_UP_FAREWELL = 'def farewell(name):\n    return f"Goodbye, {name}. See you!"\n'
-READ_ONLY_THREAD = "01a10cf5-8906-7fb2-b58b-3eb7855820a2"
-WRITING_THREAD = "01a11b2e-3c4d-7e5f-8a6b-7c8d9e0f1a2b"
+FOLLOWED_UP_FAREWELL = 'def farewell(name):\n    """Return a farewell for the given name."""\n    return f"Goodbye, {name}!"\n'
+READ_ONLY_THREAD = "01a1159d-26a8-7c41-be41-af6ec376cc46"
+WRITING_THREAD = "01a1159d-9fe5-7490-b406-718479d29be3"
 
 
 class ResumeTestCase(WrapperTestCase):

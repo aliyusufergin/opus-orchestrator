@@ -89,22 +89,20 @@ class ReadOnlyDelegationTest(WrapperTestCase):
         self.assertTrue(result_path.is_relative_to(record), result_path)
         result = json.loads(result_path.read_text())
         self.assertEqual(result["status"], "done")
-        self.assertEqual(
-            result["summary"], "greet() is defined in src/greet.py and called only from src/main.py."
-        )
-        self.assertEqual(result["assumptions"], ["Generated files are out of scope."])
+        self.assertEqual(result["summary"], 'The greet() call site is src/main.py:3 (`print(greet("world"))`).')
+        self.assertEqual(result["checks"], [{"command": r"rg -n '\bgreet\s*\(' .", "exit_code": 0}])
 
         evidence = json.loads((result_path.parent / "evidence.json").read_text())
         self.assertEqual(evidence["delegation_id"], stdout_field(completed.stdout, "Delegation"))
         self.assertEqual(evidence["model"], "gpt-6-luna")
         self.assertEqual(evidence["effort"], "medium")
-        self.assertEqual(evidence["thread_id"], "01a10cf5-8906-7fb2-b58b-3eb7855820a2")
+        self.assertEqual(evidence["thread_id"], "01a1159d-26a8-7c41-be41-af6ec376cc46")
         self.assertEqual(
             evidence["usage"],
             {
-                "input_tokens": 24587,
-                "cached_input_tokens": 18944,
-                "output_tokens": 130,
+                "input_tokens": 19736,
+                "cached_input_tokens": 8960,
+                "output_tokens": 178,
                 "reasoning_output_tokens": 0,
             },
         )
@@ -122,11 +120,11 @@ class ReadOnlyDelegationTest(WrapperTestCase):
         self.assertIn("gpt-6-luna", stdout_field(completed.stdout, "Model"))
         self.assertIn("medium", stdout_field(completed.stdout, "Model"))
         tokens = stdout_field(completed.stdout, "Tokens")
-        for count in ["24587", "18944", "130"]:
+        for count in ["19736", "8960", "178"]:
             self.assertIn(count, tokens)
         self.assertEqual(
             stdout_field(completed.stdout, "Summary"),
-            "greet() is defined in src/greet.py and called only from src/main.py.",
+            'The greet() call site is src/main.py:3 (`print(greet("world"))`).',
         )
         self.assertLessEqual(len(completed.stdout.splitlines()), 10)
 
@@ -149,9 +147,7 @@ class DelegateExitCodeTest(WrapperTestCase):
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertEqual(stdout_field(completed.stdout, "Status"), "blocked")
         result = json.loads(Path(stdout_field(completed.stdout, "Result")).read_text())
-        self.assertEqual(
-            result["open_questions"], ["Is the task about src/greet.py or legacy/greet.py?"]
-        )
+        self.assertEqual(result["open_questions"], ["What should greet() be renamed to?"])
 
     def test_refuses_an_unknown_run_without_calling_codex(self) -> None:
         self.start_run()

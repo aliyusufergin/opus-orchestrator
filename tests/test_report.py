@@ -11,8 +11,8 @@ from support import WrapperTestCase, stdout_field
 TASK_PART = "# Goal\nFind where greet() is called.\n"
 
 # Token usage in the fake Codex scenarios.
-DONE_TOKENS = ("24587 input", "18944 cached", "130 output", "0 reasoning")
-BLOCKED_TOKENS = ("13661 input", "0 cached", "19 output", "0 reasoning")
+DONE_TOKENS = ("19736 input", "8960 cached", "178 output", "0 reasoning")
+BLOCKED_TOKENS = ("9894 input", "0 cached", "68 output", "0 reasoning")
 
 
 class ReportTestCase(WrapperTestCase):
@@ -109,7 +109,7 @@ class RunReportTest(ReportTestCase):
         stdout = self.report_stdout(run_id)
 
         sol_total = model_total_line(stdout, "gpt-6.1-sol")
-        for count in ("38248 input", "18944 cached", "149 output", "0 reasoning", "2 Delegations"):
+        for count in ("29630 input", "8960 cached", "246 output", "0 reasoning", "2 Delegations"):
             self.assertIn(count, sol_total)
         astra_total = model_total_line(stdout, "gpt-6-astra")
         for count in (*DONE_TOKENS, "1 Delegation"):

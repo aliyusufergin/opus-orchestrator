@@ -8,7 +8,7 @@ This is an early version. Its skill is a minimal pointer to the wrapper. The ful
 
 - Linux
 - Claude Code
-- The Codex CLI, signed in with ChatGPT (checked with 0.159.2)
+- The Codex CLI, signed in with ChatGPT (checked against the real Codex 0.159.2; see [docs/real-codex-check.md](docs/real-codex-check.md))
 - Python 3.11 or later; the wrapper uses only the standard library
 - Git 2.31 or later
 

@@ -1,1 +1,1 @@
-{"status":"done","summary":"greet() is defined in src/greet.py and called only from src/main.py.","changed_files":null,"checks":null,"assumptions":["Generated files are out of scope."],"open_questions":null,"findings":null}
+{"status":"done","summary":"The greet() call site is src/main.py:3 (`print(greet(\"world\"))`).","changed_files":null,"checks":[{"command":"rg -n '\\bgreet\\s*\\(' .","exit_code":0}],"assumptions":null,"open_questions":null,"findings":null}
