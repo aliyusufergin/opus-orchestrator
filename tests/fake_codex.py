@@ -8,6 +8,11 @@ names and the files it found in its working directory, then plays back a
 scenario from tests/fixtures/codex. The record gives the times it started and,
 once the scenario is played, ended.
 
+`codex exec resume <SESSION_ID> <PROMPT>` is recorded as the `exec resume`
+subcommand, with the session id and prompt as its positionals. The options of
+`codex exec` that `resume` lacks are accepted only before `resume`, as Codex
+accepts them.
+
 `codex debug models` prints a model catalog from tests/fixtures/codex/catalogs.
 
 Environment:
@@ -62,6 +67,17 @@ FLAGS = {
     "--ignore-rules",
     "--json",
 }
+# `codex exec resume --help`, Codex CLI 0.159.2: what may follow `resume`.
+RESUME_OPTIONS_WITH_VALUE = {
+    name: long
+    for name, long in OPTIONS_WITH_VALUE.items()
+    if long
+    in {
+        "--config", "--enable", "--disable", "--image", "--model",
+        "--thread-source", "--output-schema", "--output-last-message",
+    }
+}
+RESUME_FLAGS = (FLAGS - {"--oss", "--approve-for-me"}) | {"--last", "--all"}
 SANDBOX_MODES = {"read-only", "workspace-write", "danger-full-access"}
 
 
@@ -126,23 +142,28 @@ def main(argv: list[str]) -> int:
     if argv[:2] == ["debug", "models"]:
         return debug_models(argv[2:])
     if argv[:1] != ["exec"]:
-        return fail("the fake supports only `codex exec` and `codex debug models`")
+        return fail("the fake supports only `codex exec`, `codex exec resume` and `codex debug models`")
 
+    subcommand = "exec"
     options: dict[str, list[str]] = {}
     flags: list[str] = []
     positionals: list[str] = []
+    with_value, known_flags = OPTIONS_WITH_VALUE, FLAGS
     args = iter(argv[1:])
     for arg in args:
         name, has_inline, inline = arg.partition("=")
-        if name in OPTIONS_WITH_VALUE:
+        if name in with_value:
             value = inline if has_inline else next(args, None)
             if value is None:
                 return fail(f"a value is required for '{name}'")
-            options.setdefault(OPTIONS_WITH_VALUE[name], []).append(value)
-        elif arg in FLAGS:
+            options.setdefault(with_value[name], []).append(value)
+        elif arg in known_flags:
             flags.append(arg)
         elif arg.startswith("-") and arg != "-":
             return fail(f"unexpected argument '{arg}' found")
+        elif arg == "resume" and subcommand == "exec" and not positionals:
+            subcommand = "exec resume"
+            with_value, known_flags = RESUME_OPTIONS_WITH_VALUE, RESUME_FLAGS
         else:
             positionals.append(arg)
 
@@ -152,7 +173,10 @@ def main(argv: list[str]) -> int:
 
     # As codex exec: `-` forces reading the prompt from stdin; with a prompt
     # argument, piped stdin is read as additional input.
-    prompt = positionals[0] if positionals else None
+    if subcommand == "exec resume" and not positionals and "--last" not in flags:
+        return fail("a session id or --last is required to resume")
+    prompt_index = 1 if subcommand == "exec resume" and "--last" not in flags else 0
+    prompt = positionals[prompt_index] if len(positionals) > prompt_index else None
     stdin_text = None
     if prompt == "-" or not sys.stdin.isatty():
         if prompt is None:
@@ -163,7 +187,7 @@ def main(argv: list[str]) -> int:
 
     invocation: dict[str, object] = {
         "argv": argv,
-        "subcommand": argv[0],
+        "subcommand": subcommand,
         "options": options,
         "flags": flags,
         "positionals": positionals,
