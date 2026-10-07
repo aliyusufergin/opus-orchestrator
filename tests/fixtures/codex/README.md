@@ -21,6 +21,10 @@ The events are built from real `codex exec --json` output, recorded with Codex C
 | `write-no-result` | As `write-done`, ending in the `turn.failed` event of `no-result` |
 | `write-hang` | As `write-done`, hanging before its final message |
 
+## Codex error messages
+
+[`error-messages.json`](error-messages.json) holds the quota and sign-in failure messages the wrapper recognises in Codex's `error` and `turn.failed` events, each with the failure kind it gives and where it comes from in Codex's source at tag `rust-v0.159.2`. Usage-limit messages end in a reset time, filled in here as Codex formats it. The tests play each message back in an event built after the `no-result` framing. The wrapper matches the leading text the messages share, in `CODEX_ERROR_TEXTS`; when Codex changes a message, update both.
+
 ## Model catalogs
 
 [`catalogs/`](catalogs) holds what `codex debug models` prints, selected by `FAKE_CODEX_CATALOG`:

@@ -1,0 +1,50 @@
+{
+  "source": "openai/codex at tag rust-v0.159.2",
+  "messages": [
+    {
+      "kind": "quota_exhausted",
+      "source": "codex-rs/protocol/src/error.rs, UsageLimitReachedError on a Plus plan",
+      "message": "You’ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at 9:41 PM."
+    },
+    {
+      "kind": "quota_exhausted",
+      "source": "codex-rs/protocol/src/error.rs, UsageLimitReachedError on an unknown plan",
+      "message": "You’ve hit your usage limit. Try again later."
+    },
+    {
+      "kind": "quota_exhausted",
+      "source": "codex-rs/protocol/src/error.rs, CodexErr::QuotaExceeded",
+      "message": "Quota exceeded. Check your plan and billing details."
+    },
+    {
+      "kind": "auth",
+      "source": "codex-rs/login/src/auth/manager.rs, REFRESH_TOKEN_EXPIRED_MESSAGE",
+      "message": "Your access token could not be refreshed because your refresh token has expired. Please log out and sign in again."
+    },
+    {
+      "kind": "auth",
+      "source": "codex-rs/login/src/auth/manager.rs, REFRESH_TOKEN_REUSED_MESSAGE",
+      "message": "Your access token could not be refreshed because your refresh token was already used. Please log out and sign in again."
+    },
+    {
+      "kind": "auth",
+      "source": "codex-rs/login/src/auth/manager.rs, REFRESH_TOKEN_INVALIDATED_MESSAGE",
+      "message": "Your access token could not be refreshed because your refresh token was revoked. Please log out and sign in again."
+    },
+    {
+      "kind": "auth",
+      "source": "codex-rs/login/src/auth/manager.rs, REFRESH_TOKEN_UNKNOWN_MESSAGE",
+      "message": "Your access token could not be refreshed. Please log out and sign in again."
+    },
+    {
+      "kind": "auth",
+      "source": "codex-rs/login/src/auth/manager.rs, REFRESH_TOKEN_ACCOUNT_MISMATCH_MESSAGE",
+      "message": "Your access token could not be refreshed because you have since logged out or signed in to another account. Please sign in again."
+    },
+    {
+      "kind": "auth",
+      "source": "codex-rs/protocol/src/error.rs, UnexpectedResponseError for an HTTP 401",
+      "message": "unexpected status 401 Unauthorized: Missing bearer or basic authentication in header, url: https://chatgpt.com/backend-api/codex/responses"
+    }
+  ]
+}

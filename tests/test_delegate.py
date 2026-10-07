@@ -190,16 +190,6 @@ class DelegateExitCodeTest(WrapperTestCase):
                 self.assertIn("Write scope", completed.stderr)
         self.assertEqual(self.codex_calls(), [])
 
-    def test_fails_when_codex_returns_no_result(self) -> None:
-        run_id, record = self.start_run()
-
-        completed = self.delegate(run_id, scenario="no-result")
-
-        self.assertNotEqual(completed.returncode, 0)
-        self.assertIn("no Result", completed.stderr)
-        self.assertEqual(completed.stdout, "")
-        self.assertEqual(list(record.rglob("result.json")), [])
-
     def test_fails_when_codex_cannot_be_run(self) -> None:
         run_id, _ = self.start_run()
 

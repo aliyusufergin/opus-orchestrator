@@ -149,17 +149,28 @@ class WrapperTestCase(unittest.TestCase):
         scenario: str = "read-only-done",
         stdin: int | IO[Any] | None = subprocess.DEVNULL,
         codex: Path = FAKE_CODEX,
+        checks: list[str] | None = None,
+        timeout: str | None = None,
     ) -> subprocess.CompletedProcess[str]:
         return self.run_wrapper(
-            *self.delegate_args(run_id, task=task, write_scope=write_scope),
+            *self.delegate_args(
+                run_id, task=task, write_scope=write_scope, checks=checks, timeout=timeout
+            ),
             scenario=scenario,
             stdin=stdin,
             codex=codex,
         )
 
     def delegate_args(
-        self, run_id: str, *, task: Path | None = None, write_scope: list[str] | None = None
+        self,
+        run_id: str,
+        *,
+        task: Path | None = None,
+        write_scope: list[str] | None = None,
+        checks: list[str] | None = None,
+        timeout: str | None = None,
     ) -> list[str]:
+        """`delegate`'s arguments; `timeout` is in minutes, as `--timeout` takes it."""
         return [
             "delegate",
             "--run", run_id,
@@ -167,6 +178,8 @@ class WrapperTestCase(unittest.TestCase):
             "--model", "gpt-6-luna",
             "--effort", "medium",
             "--write-scope", *(write_scope or ["none"]),
+            *(arg for check in checks or [] for arg in ("--check", check)),
+            *(["--timeout", timeout] if timeout is not None else []),
         ]
 
     def write_task(self, text: str) -> Path:

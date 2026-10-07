@@ -26,7 +26,7 @@ import time
 from contextlib import contextmanager
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable, Iterator
+from typing import IO, Any, Iterable, Iterator
 
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 FIXED_PART = PLUGIN_ROOT / "contract" / "fixed-part.md"
@@ -40,6 +40,11 @@ MODEL_NOTES_ENV = "OPUS_ORCHESTRATOR_MODEL_NOTES"
 
 # Older notes may no longer match the catalog or the models' measured strengths.
 MODEL_NOTES_MAX_AGE_DAYS = 30
+# A Delegation that runs longer is stopped (ADR 0001); the Orchestrator may raise it up to the limit.
+DEFAULT_TIMEOUT_MINUTES = 20
+MAX_TIMEOUT_MINUTES = 60
+# How long a stopped process group gets to exit before it is killed.
+STOP_GRACE_SECONDS = 5
 # `ultra` is xhigh plus automatic subagent delegation, which Delegates never get (ADR 0001).
 REFUSED_EFFORTS = {"ultra"}
 
@@ -57,6 +62,22 @@ SNAPSHOT_IDENTITY = {
     "GIT_COMMITTER_NAME": "Opus Orchestrator",
     "GIT_COMMITTER_EMAIL": "opus-orchestrator@localhost",
 }
+
+# Texts in Codex's error events that name a failure the Orchestrator acts on, from Codex's source
+# (rust-v0.159.2); tests/fixtures/codex/error-messages.json holds the full messages they match.
+CODEX_ERROR_TEXTS = {
+    # UsageLimitReachedError and CodexErr::QuotaExceeded in codex-rs/protocol/src/error.rs.
+    "quota_exhausted": (
+        "You’ve hit your usage limit",
+        "Quota exceeded. Check your plan and billing details.",
+    ),
+    # The refresh-token messages in codex-rs/login/src/auth/manager.rs, and an HTTP 401.
+    "auth": ("Your access token could not be refreshed", "unexpected status 401"),
+}
+
+# How much of a Check's output the evidence keeps; the whole output stays in the Run record.
+CHECK_TAIL_LINES = 40
+CHECK_TAIL_CHARS = 4000
 
 USAGE_FIELDS = ("input_tokens", "cached_input_tokens", "output_tokens", "reasoning_output_tokens")
 SUMMARY_LIMIT = 300
@@ -422,8 +443,23 @@ def codex_command(
     ]
 
 
+def check_timeout(minutes: float) -> float:
+    if not 0 < minutes <= MAX_TIMEOUT_MINUTES:
+        raise WrapperError(
+            f"timeout {minutes:g} minutes is refused: give more than 0 and at most {MAX_TIMEOUT_MINUTES}",
+            EXIT_USAGE,
+        )
+    return minutes
+
+
 def delegate(args: argparse.Namespace) -> int:
     write_scope = parse_write_scope(args.write_scope)
+    timeout_minutes = check_timeout(args.timeout)
+    if write_scope is None and args.check:
+        raise WrapperError(
+            "Checks are rerun only for a writing Delegation; a read-only one changes nothing to check",
+            EXIT_USAGE,
+        )
     cwd = Path.cwd()
     run_dir = run_record(cwd, args.run)
     try:
@@ -440,38 +476,48 @@ def delegate(args: argparse.Namespace) -> int:
     last_message = delegation_dir / "last-message.txt"
     events_path = delegation_dir / "events.jsonl"
 
+    timeout = timeout_minutes * 60
     started_at, started = now(), time.monotonic()
     if write_scope is None:
-        codex = run_codex(codex_command(args, None, toplevel, last_message), contract, toplevel, events_path)
+        command = codex_command(args, None, toplevel, last_message)
+        exit_code = run_codex(command, contract, toplevel, events_path, timeout)
         changes = dict.fromkeys(("snapshot", "diff", "changed_paths", "outside_write_scope"))
+        check_reruns = None
     else:
         snapshot = take_snapshot(toplevel)
         with snapshot_worktree(toplevel, snapshot, f"{args.run}-{delegation_id}") as worktree:
             command = codex_command(args, write_scope, worktree, last_message)
-            codex = run_codex(command, contract, worktree, events_path)
+            exit_code = run_codex(command, contract, worktree, events_path, timeout)
+            # After the diff is taken, so that what a Check builds stays out of it.
             changes = collect_changes(worktree, snapshot, write_scope, delegation_dir)
+            check_reruns = rerun_checks(args.check, worktree, delegation_dir, timeout)
     duration = time.monotonic() - started
 
-    result = read_json_object(last_message)  # The Delegate's final message.
-    if result is None:
-        raise WrapperError(
-            f"Codex returned no Result (exit code {codex.returncode}); "
-            f"its events and stderr are in {delegation_dir}"
-        )
-    thread_id, usage = read_events(events_path)
+    thread_id, usage, errors = read_events(events_path)
+    result, result_problem = read_result(last_message)
+    failure_kind, failure_message = None, None
+    failure = classify_failure(exit_code, timeout_minutes, errors, result_problem)
+    if failure is not None or result is None:
+        failure_kind, failure_message = failure or ("invalid_result", str(result_problem))
+        # The Delegate's own message stays in last-message.txt.
+        result = wrapper_result(failure_kind, failure_message, changes["changed_paths"])
     evidence = {
         "run_id": args.run,
         "delegation_id": delegation_id,
         "model": args.model,
         "effort": args.effort,
         "write_scope": "none" if write_scope is None else write_scope,
+        "timeout_minutes": timeout_minutes,
         "started_at": started_at,
         "ended_at": now(),
         "duration_seconds": round(duration, 3),
         "thread_id": thread_id,
         "usage": usage,
-        "codex_exit_code": codex.returncode,
+        "codex_exit_code": exit_code,
+        "failure_kind": failure_kind,
+        "failure": failure_message,
         **changes,
+        "check_reruns": check_reruns,
     }
     result_path = delegation_dir / "result.json"
     write_json(result_path, result)
@@ -480,20 +526,206 @@ def delegate(args: argparse.Namespace) -> int:
     return 0
 
 
+def read_result(path: Path) -> tuple[dict[str, Any] | None, str | None]:
+    """The Delegate's Result, or None and what is wrong with it."""
+    try:
+        text = path.read_text()
+    except OSError:
+        return None, "Codex wrote no Result"
+    if not text.strip():
+        return None, "the Result is empty"
+    try:
+        result = json.loads(text)
+    except ValueError:
+        return None, "the Result isn't JSON"
+    problem = schema_problem(result, json.loads(RESULT_SCHEMA.read_text()), "the Result")
+    if problem:
+        return None, problem
+    return result, None
+
+
+JSON_TYPES = {
+    "object": lambda value: isinstance(value, dict),
+    "array": lambda value: isinstance(value, list),
+    "string": lambda value: isinstance(value, str),
+    "integer": lambda value: isinstance(value, int) and not isinstance(value, bool),
+    "null": lambda value: value is None,
+}
+
+
+def schema_problem(value: Any, schema: dict[str, Any], where: str) -> str | None:
+    """What keeps `value` from matching `schema`, or None.
+
+    Covers the keywords the Result schema may use (scripts/check_package.py holds it to them).
+    """
+    if "anyOf" in schema:
+        problems = [schema_problem(value, option, where) for option in schema["anyOf"]]
+        return None if None in problems else "; ".join(p for p in problems if p)
+    expected = schema.get("type")
+    if expected is not None and not JSON_TYPES[expected](value):
+        return f"{where} is not of type {expected}"
+    if "enum" in schema and value not in schema["enum"]:
+        return f"{where} is {value!r}, not one of {', '.join(map(str, schema['enum']))}"
+    if expected == "object":
+        properties = schema.get("properties", {})
+        missing = [name for name in schema.get("required", []) if name not in value]
+        if missing:
+            return f"{where} lacks {', '.join(missing)}"
+        extra = [name for name in value if name not in properties]
+        if extra and schema.get("additionalProperties") is False:
+            return f"{where} has unexpected {', '.join(extra)}"
+        for name, subschema in properties.items():
+            if name in value and (problem := schema_problem(value[name], subschema, f"{where}.{name}")):
+                return problem
+    if expected == "array" and "items" in schema:
+        for index, item in enumerate(value):
+            if problem := schema_problem(item, schema["items"], f"{where}[{index}]"):
+                return problem
+    return None
+
+
+def classify_failure(
+    exit_code: int | None, timeout_minutes: float, errors: list[str], result_problem: str | None
+) -> tuple[str, str] | None:
+    """The failure kind and its message, or None for a Delegation that went as it should."""
+    if exit_code is None:
+        return "timeout", f"Codex was stopped after the {timeout_minutes:g}-minute timeout"
+    if exit_code == 0 and not result_problem:
+        return None  # Codex got past any error it reported, such as one it retried.
+    for kind, texts in CODEX_ERROR_TEXTS.items():
+        for error in errors:
+            if any(text in error for text in texts):
+                return kind, error
+    # Codex's own failure explains a missing Result better than the missing Result does.
+    if exit_code != 0:
+        return "codex_error", errors[-1] if errors else f"Codex exited with code {exit_code}"
+    if result_problem:
+        return "invalid_result", result_problem
+    return None
+
+
+def rerun_checks(
+    checks: list[str], worktree: Path, delegation_dir: Path, timeout: float
+) -> list[dict[str, Any]]:
+    """Run each Check in the worktree, whatever the Delegate claimed.
+
+    The Checks share one `timeout` in seconds; an exit code of None means a Check ran past what
+    was left of it. The evidence keeps each Check's output tail; the whole output goes to the
+    Run record.
+    """
+    deadline = time.monotonic() + timeout
+    reruns = []
+    for number, command in enumerate(checks, start=1):
+        log = delegation_dir / f"check-{number}.log"
+        with open(log, "wb") as output:
+            exit_code = run_process_group(
+                ["/bin/sh", "-c", command],
+                max(deadline - time.monotonic(), 0),
+                cwd=worktree,
+                input=None,
+                stdout=output,
+                stderr=subprocess.STDOUT,
+            )
+        reruns.append(
+            {"command": command, "exit_code": exit_code, "output_tail": tail(log), "output": str(log)}
+        )
+    return reruns
+
+
+def tail(path: Path) -> str:
+    lines = path.read_text(errors="replace").splitlines(keepends=True)
+    return "".join(lines[-CHECK_TAIL_LINES:])[-CHECK_TAIL_CHARS:]
+
+
+def describe_checks(checks: list[dict[str, Any]]) -> str:
+    if not checks:
+        return "none given"
+    failed = [check["command"] for check in checks if check["exit_code"] != 0]
+    if not failed:
+        return f"{len(checks)} passed"
+    return f"{len(failed)} of {len(checks)} failed: {'; '.join(failed)}"
+
+
+def wrapper_result(failure_kind: str, failure: str, changed_paths: list[str] | None) -> dict[str, Any]:
+    """The Result the wrapper writes when the Delegate's own can't stand: never `done`."""
+    return {
+        # A timeout keeps what the Delegate did; anything else hands the decision back.
+        "status": "partial" if failure_kind == "timeout" else "blocked",
+        "summary": f"Written by the wrapper, not the Delegate: {failure}. See the evidence.",
+        "changed_files": changed_paths,
+        "checks": None,
+        "assumptions": None,
+        "open_questions": None,
+        "findings": None,
+    }
+
+
 def run_codex(
-    command: list[str], contract: str, workdir: Path, events_path: Path
-) -> subprocess.CompletedProcess[bytes]:
-    """Run Codex with the Contract on stdin, its events and stderr going to the Run record."""
+    command: list[str], contract: str, workdir: Path, events_path: Path, timeout: float
+) -> int | None:
+    """Run Codex with the Contract on stdin, its events and stderr going to the Run record.
+
+    Returns its exit code, or None when it ran past `timeout` seconds and was stopped.
+    """
     with (
         open(events_path, "wb") as events,
         open(events_path.parent / "codex-stderr.log", "wb") as stderr,
     ):
         try:
-            return subprocess.run(command, input=contract.encode(), stdout=events, stderr=stderr, cwd=workdir)
+            return run_process_group(
+                command, timeout, cwd=workdir, input=contract.encode(), stdout=events, stderr=stderr
+            )
         except OSError as error:
             raise WrapperError(
                 f"cannot run Codex ({command[0]}): {error.strerror}; set {CODEX_ENV} to its path"
             ) from None
+
+
+def run_process_group(
+    command: list[str],
+    timeout: float,
+    *,
+    cwd: Path,
+    input: bytes | None,
+    stdout: IO[bytes],
+    stderr: IO[bytes] | int,
+) -> int | None:
+    """Run `command` in a process group of its own, which is ended afterwards whatever happens.
+
+    Returns its exit code, or None when it ran past `timeout` seconds.
+    """
+    process = subprocess.Popen(
+        command,
+        cwd=cwd,
+        stdin=subprocess.DEVNULL if input is None else subprocess.PIPE,
+        stdout=stdout,
+        stderr=stderr,
+        start_new_session=True,
+    )
+    try:
+        process.communicate(input, timeout=timeout)
+        return process.returncode
+    except subprocess.TimeoutExpired:
+        return None
+    finally:
+        end_process_group(process)
+
+
+def end_process_group(process: subprocess.Popen[bytes]) -> None:
+    """Ask the process group to stop, then kill what is left of it: also processes it left behind."""
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    try:
+        process.wait(timeout=STOP_GRACE_SECONDS)
+    except subprocess.TimeoutExpired:
+        pass
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    process.wait()
 
 
 def read_json_object(path: Path) -> dict[str, Any] | None:
@@ -514,10 +746,11 @@ def add_usage(total: dict[str, int] | None, usage: dict[str, Any]) -> dict[str, 
     return total
 
 
-def read_events(events_path: Path) -> tuple[str | None, dict[str, int] | None]:
-    """The thread id and the summed token usage from Codex's JSONL events."""
+def read_events(events_path: Path) -> tuple[str | None, dict[str, int] | None, list[str]]:
+    """The thread id, the summed token usage and the error messages from Codex's JSONL events."""
     thread_id = None
     usage: dict[str, int] | None = None
+    errors = []
     for line in events_path.read_text(errors="replace").splitlines():
         try:
             event = json.loads(line)
@@ -529,7 +762,13 @@ def read_events(events_path: Path) -> tuple[str | None, dict[str, int] | None]:
             thread_id = event.get("thread_id")
         elif event.get("type") == "turn.completed" and isinstance(event.get("usage"), dict):
             usage = add_usage(usage, event["usage"])
-    return thread_id, usage
+        elif event.get("type") == "error" and isinstance(event.get("message"), str):
+            errors.append(event["message"])
+        elif event.get("type") == "turn.failed" and isinstance(event.get("error"), dict):
+            message = event["error"].get("message")
+            if isinstance(message, str):
+                errors.append(message)
+    return thread_id, usage, errors
 
 
 def format_tokens(usage: dict[str, int] | None) -> str:
@@ -550,12 +789,15 @@ def print_summary(result_path: Path, result: dict[str, Any], evidence: dict[str,
     print(f"Delegation: {evidence['delegation_id']}")
     print(f"Status: {result.get('status')}")
     print(f"Model: {evidence['model']}, effort {evidence['effort']}")
+    if evidence["failure_kind"]:
+        print(f"Failure: {evidence['failure_kind']}: {evidence['failure']}")
     print(f"Duration: {evidence['duration_seconds']:.1f} s")
     print(f"Tokens: {tokens}")
     if evidence["diff"] is not None:
         print(f"Diff: {evidence['diff']}")
         print(f"Changed paths: {len(evidence['changed_paths'])}")
         print(f"Outside Write scope: {', '.join(evidence['outside_write_scope']) or 'none'}")
+        print(f"Checks: {describe_checks(evidence['check_reruns'])}")
     print(f"Summary: {summary}")
 
 
@@ -657,6 +899,23 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         nargs="+",
         metavar="PATH",
         help="repository-relative paths the Delegate may change, or `none` for a read-only Delegation",
+    )
+    delegate_command.add_argument(
+        "--check",
+        action="append",
+        default=[],
+        metavar="COMMAND",
+        help="a Check the wrapper reruns in the worktree after a writing Delegation; repeatable",
+    )
+    delegate_command.add_argument(
+        "--timeout",
+        type=float,
+        default=DEFAULT_TIMEOUT_MINUTES,
+        metavar="MINUTES",
+        help=(
+            f"stop the Delegate after this many minutes; "
+            f"default {DEFAULT_TIMEOUT_MINUTES}, at most {MAX_TIMEOUT_MINUTES}"
+        ),
     )
     delegate_command.set_defaults(handler=delegate)
 
