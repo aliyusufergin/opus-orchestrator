@@ -37,6 +37,9 @@ class CodexCall:
     stdin: str | None
     cwd: str
     files: dict[str, str]  # Every file in its working directory, by relative path, Git's aside.
+    pid: int | None = None  # `exec` only.
+    started_at: float | None = None  # Epoch seconds; `exec` only.
+    ended_at: float | None = None  # Epoch seconds, once the scenario was played to its end.
 
     def option(self, name: str) -> str | None:
         values = self.options.get(name, [])
@@ -128,6 +131,8 @@ class WrapperTestCase(unittest.TestCase):
         env["FAKE_CODEX_CATALOG"] = str(CATALOGS / f"{catalog}.json")
         env["FAKE_CODEX_RECORD"] = str(self.codex_records)
         env["OPUS_ORCHESTRATOR_CODEX"] = str(codex)
+        # The test's own Delegation slots, apart from the machine's.
+        env["OPUS_ORCHESTRATOR_SLOTS"] = str(self.tmp / "slots")
         if model_notes is not None:
             env["OPUS_ORCHESTRATOR_MODEL_NOTES"] = str(model_notes)
         return env

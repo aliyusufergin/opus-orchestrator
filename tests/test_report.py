@@ -78,7 +78,7 @@ class RunReportTest(ReportTestCase):
             self.assertIn(status, line)
             for count in tokens:
                 self.assertIn(count, line)
-            self.assertIn("waited not recorded", line)
+            self.assertRegex(line, r"waited \d+\.\d s")
             self.assertRegex(line, r"ran \d+\.\d s")
 
     def test_lists_delegations_in_the_order_they_were_started(self) -> None:

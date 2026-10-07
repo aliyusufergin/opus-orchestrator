@@ -1,0 +1,1 @@
+{"status":"done","summary":"greet() is defined in src/greet.py and called only from src/main.py.","changed_files":null,"checks":null,"assumptions":["Generated files are out of scope."],"open_questions":null,"findings":null}
