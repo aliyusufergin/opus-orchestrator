@@ -238,6 +238,7 @@ class RunTest(TestCaseRunnerTest):
         self.assertEqual(entry["task"], "bug-fix")
         self.assertEqual(entry["config"], "pointer")
         self.assertIs(entry["passed"], True)
+        self.assertEqual(entry["changed_paths"], [" M calc.py"])
         self.assertEqual(entry["check"]["exit_code"], 0)
         self.assertGreaterEqual(entry["wall_seconds"], 0)
         self.assertEqual(
@@ -284,6 +285,7 @@ class RunTest(TestCaseRunnerTest):
         [entry] = self.results_log()
         self.assertIsNone(entry["passed"])
         self.assertIsNone(entry["check"])
+        self.assertEqual(entry["changed_paths"], [])
         self.assertEqual(entry["final_message"], "It subtracts b from a.")
         self.assertIn("It subtracts.", completed.stdout)
 

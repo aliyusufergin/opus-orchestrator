@@ -183,7 +183,7 @@ def plugin_copy(config: str) -> Iterator[Path | None]:
         shutil.rmtree(parent, ignore_errors=True)
 
 
-def claude_command(task: Task, config: str, model: str, plugin: Path | None) -> list[str]:
+def claude_command(task: Task, model: str, plugin: Path | None) -> list[str]:
     prompt = task.prompt if plugin is None else f"{SKILL_COMMAND} {task.prompt}"
     # An installed copy of the plugin stays off, so only the configuration's copy is loaded.
     settings = {"enabledPlugins": {f"{PLUGIN_NAME}@{PLUGIN_NAME}": False}}
@@ -201,7 +201,7 @@ def claude_command(task: Task, config: str, model: str, plugin: Path | None) -> 
 
 
 def claude_tokens(output: dict[str, Any]) -> dict[str, int] | None:
-    """Claude's tokens over every model the session used, subagents included."""
+    """Claude's tokens over every model the Orchestrator used, subagents included."""
     models = output.get("modelUsage")
     if not isinstance(models, dict):
         return None
@@ -247,7 +247,7 @@ def grade_answer(task: Task, final_message: str) -> bool | None:
 
 def run_task(task: Task, config: str, model: str, results: Path, keep: bool) -> int:
     with throwaway_clone(task, task.start, keep=keep) as clone, plugin_copy(config) as plugin:
-        command = claude_command(task, config, model, plugin)
+        command = claude_command(task, model, plugin)
         print(f"Running {task.id} ({config}) in {clone}", flush=True)
         started = time.monotonic()
         try:
@@ -262,6 +262,8 @@ def run_task(task: Task, config: str, model: str, results: Path, keep: bool) -> 
         if completed.returncode != 0:
             print(f"Claude exited with {completed.returncode}: {completed.stderr.strip()[-1000:]}", file=sys.stderr)
         final_message = output.get("result") if isinstance(output.get("result"), str) else ""
+        # What the Orchestrator left changed, before the check adds the acceptance tests.
+        changed = git(clone, "status", "--porcelain", "--untracked-files=all").decode(errors="replace").splitlines()
 
         check = run_check(task, clone) if task.check is not None else None
         passed = check["exit_code"] == 0 if check is not None else grade_answer(task, final_message)
@@ -281,6 +283,7 @@ def run_task(task: Task, config: str, model: str, results: Path, keep: bool) -> 
                 "models": output.get("modelUsage"),
             },
             "codex": codex_usage(clone),
+            "changed_paths": changed,
             "final_message": final_message,
             "clone": str(clone) if keep else None,
         }
