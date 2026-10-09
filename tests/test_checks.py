@@ -23,7 +23,7 @@ class CheckRerunTest(WritingDelegationTestCase):
         evidence = self.evidence(completed)
         result = json.loads(Path(stdout_field(completed.stdout, "Result")).read_text())
         self.assertEqual(result["status"], "done", "the Delegate's own claim is kept as it made it")
-        self.assertIsNone(result["checks"])
+        self.assertEqual([check["exit_code"] for check in result["checks"]], [0], "it claimed a passing Check")
         passed, failed = evidence["check_reruns"]
         self.assertEqual(passed["command"], PASSING_CHECK)
         self.assertEqual(passed["exit_code"], 0)
