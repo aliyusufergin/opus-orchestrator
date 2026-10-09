@@ -1,0 +1,146 @@
+# The test cases (the spec's seam 3). Each task names the repository it is cloned from, the
+# commit to start from, the prompt the Orchestrator gets, and either a check or a known answer.
+#
+# - start: the clone holds this commit and its history only. For a revert-and-redo task it is
+#   the parent of the original commit, so that commit is not in the clone to be found.
+# - check: a bash command run in the clone after Claude ends; exit code 0 is a pass.
+# - reference, reference_files: before the check runs, these files are taken from the
+#   reference commit (the original solution) and put into the clone. They are its acceptance
+#   tests, so the prompt names the interface those tests use. A dry run also checks that the
+#   check passes at the reference.
+# - answer: the points a correct answer makes. The user judges the final message against it.
+
+[[tasks]]
+id = "bug-fix"
+title = "Fail on a vanished locked n8n tag (revert and redo n8n-custom-ytdlp 5683b06)"
+repository = "~/projects/n8n-custom-ytdlp"
+start = "556a9dd7d38ee75782ad56231359cf60d5f8e3f4"
+reference = "5683b067b4121a7cf1c0728c2422aeabf1871e2b"
+reference_files = ["tests/test_updater.py"]
+check = "python3 tests/test_updater.py"
+prompt = """
+Fix a bug in the updater, scripts/updater.py.
+
+When the n8n version in the lock file no longer has its Docker tag (n8nio/n8n or n8nio/runners), the updater treats it like a newly released version whose images aren't pushed yet: it keeps the locked version and the run succeeds. But a tag of the locked version that no longer exists means the lock can't be built any more, so that run must fail without a plan: exit code 1, nothing on stdout, and an error on stderr that names the missing image as <repository>:<version>, such as n8nio/runners:2.38.7, without a traceback. Only a newly planned version whose tag is missing is still skipped for the run.
+
+Cover it in the updater's recorded-response tests, tests/test_updater.py.
+"""
+
+[[tasks]]
+id = "feature"
+title = "Follow ffmpeg releases in the updater (revert and redo n8n-custom-ytdlp 6413fa1)"
+repository = "~/projects/n8n-custom-ytdlp"
+start = "3f0524fee4da541bf774471f7ec50cc958741c99"
+reference = "6413fa11f2b43e5f36ad463345dffc6555fef646"
+reference_files = [
+    "tests/test_updater.py",
+    "tests/fixtures/upstream/ffmpeg-9.0.1/HEAD%20https%3A%2F%2Fregistry-1.docker.io%2Fv2%2Fmwader%2Fstatic-ffmpeg%2Fmanifests%2F9.0.1",
+    "tests/fixtures/upstream/ffmpeg-9.0.1/https%3A%2F%2Fregistry-1.docker.io%2Fv2%2Fmwader%2Fstatic-ffmpeg%2Fmanifests%2Fsha256%3A54e55b0cb8f672870fc38ceb2e6c411855cb3b39c505f5f3b2505ee01ed5f2b7",
+    "tests/fixtures/upstream/ffmpeg-9.0.1/https%3A%2F%2Fregistry-1.docker.io%2Fv2%2Fmwader%2Fstatic-ffmpeg%2Ftags%2Flist",
+]
+check = "python3 tests/test_updater.py"
+prompt = """
+Make the updater, scripts/updater.py, follow ffmpeg releases. Today it copies the ffmpeg entry from the lock file unchanged.
+
+The updater resolves the newest mwader/static-ffmpeg release on Docker Hub and its image index digest, and plans a build when either changes.
+
+- Version selection: list the repository's tags and pick the highest release numerically, including a new major. FFmpeg names a line's first release X.Y and its patches X.Y.Z, and mwader's X.Y tags are separate images (9.0 differs from 9.0.1), so both X.Y and X.Y.Z count as releases: a new line such as 10.0 is followed before 10.0.1 exists. Ignore every other tag, such as latest, X.Y-N rebuilds and per-architecture tags like 9.0.1-arm64.
+- Digest: record the selected tag's index digest from an anonymous manifest HEAD request, as the updater already does for n8n. When the digest differs from the locked one, fetch the index by digest; it must hash to that digest and contain linux/amd64 and linux/arm64, otherwise the run fails. An unchanged digest names an index that was already checked, so a steady-state run makes no Docker Hub pull.
+- Build decision: a new version plans a build, a new digest under the same version plans a build, otherwise no build is planned.
+- Registry GETs need Docker Hub's anonymous token, like the HEAD requests. A failed token request fails the run rather than passing for a missing tag.
+- Tests use recorded responses through the existing replay mechanism and never touch the network.
+
+The acceptance tests replay these requests, recorded under tests/fixtures/upstream/ffmpeg-9.0.1/:
+- GET https://registry-1.docker.io/v2/mwader/static-ffmpeg/tags/list
+- HEAD https://registry-1.docker.io/v2/mwader/static-ffmpeg/manifests/<tag>
+- GET https://registry-1.docker.io/v2/mwader/static-ffmpeg/manifests/<digest>
+
+and expect:
+- the lock entry {"ffmpeg": {"version": "9.0.1", "image_digest": "sha256:..."}};
+- the change summaries "ffmpeg 8.1.2 → 9.0.1" and "ffmpeg 9.0.1 republished", in the same form as n8n's;
+- failures that exit 1 with nothing on stdout and these on stderr: "mwader/static-ffmpeg:9.0.1 index has no linux/amd64" (or linux/arm64, also for a single-platform manifest), "mwader/static-ffmpeg:9.0.1 index does not match its digest", and an error naming mwader/static-ffmpeg:9.0.1 when a listed tag has no manifest.
+"""
+
+[[tasks]]
+id = "investigation"
+title = "How the n8n updater handles a missing tag (read-only)"
+repository = "~/projects/n8n-custom-ytdlp"
+start = "7e7d4141def240302dfcfa5a677eb0c0f370afa7"
+prompt = """
+How does the n8n updater handle a missing tag? Explain each case and what the run does in it. This is an investigation only: don't change any files.
+"""
+answer = """
+- A missing Docker tag is found with an anonymous manifest HEAD request to Docker Hub for n8nio/n8n and n8nio/runners at the version's tag; a 404 means the tag doesn't exist (index_digest returns None).
+- A newly planned version whose tag is missing on either image is skipped for this run: the updater keeps the locked n8n entry, notes "<repository>:<version> is not pushed yet; keeping n8n <locked>" on stderr and doesn't fail. A later scheduled run retries.
+- A missing tag of the locked version itself fails the run without a plan ("... of the locked n8n version no longer exists").
+- Without a lock file to fall back on, a missing tag fails the run ("... is not pushed yet and no lock file names an n8n version to keep").
+- When n8n's latest release is 3.x or later, the updater follows the highest n8n@2.Y.Z Git tag on the locked minor; if that patch's images were never pushed, it is skipped like any version not pushed yet, without falling back to an earlier patch.
+- A failed Docker Hub token request fails the run instead of passing for a missing tag.
+"""
+
+[[tasks]]
+id = "refactor"
+title = "Remove the dead question-marks preference (loop-habit-tracker-next)"
+repository = "~/projects/loop-habit-tracker-next"
+start = "b8106cb2c59c1a39224c9b5187b5f5e16382acbe"
+check = """
+! grep -rnE 'var areQuestionMarksEnabled|\\.areQuestionMarksEnabled|onQuestionMarksChanged|"pref_unknown_enabled"' --include=*.kt uhabits-core/src uhabits-android/src \
+  && ./gradlew --quiet :uhabits-core:jvmTest :uhabits-android:compileDebugKotlin :uhabits-android:compileDebugAndroidTestKotlin
+"""
+prompt = """
+Remove the dead "Show question marks for missing data" preference.
+
+The setting is gone from the app, and Preferences.areQuestionMarksEnabled is pinned to true while what its setter stores under "pref_unknown_enabled" is ignored. Remove the property, its onQuestionMarksChanged listener callback, the storage of "pref_unknown_enabled" and everything that exists only to support them, and simplify every place that reads the property as if it were true.
+
+Keep the Entry model unchanged, including the areQuestionMarksEnabled parameter of its toggle logic, and pass true there (ADR-0001). Leave the translated strings alone. Behaviour doesn't change: the core tests and the Android build, app and instrumented tests, must still compile and pass.
+"""
+
+[[tasks]]
+id = "parallel-feature"
+title = "Always show Unanswered apart from No (revert and redo loop-habit-tracker-next b8106cb2)"
+repository = "~/projects/loop-habit-tracker-next"
+start = "48425419b9663e30a9a13c318d94777ddcb8a673"
+reference = "b8106cb2c59c1a39224c9b5187b5f5e16382acbe"
+reference_files = [
+    "uhabits-core/src/commonMain/kotlin/org/isoron/uhabits/core/test/HabitFixtures.kt",
+    "uhabits-core/src/commonTest/kotlin/org/isoron/uhabits/core/BaseUnitTest.kt",
+    "uhabits-core/src/commonTest/kotlin/org/isoron/uhabits/core/ui/screens/habits/list/ListHabitsBehaviorTest.kt",
+    "uhabits-core/src/commonTest/kotlin/org/isoron/uhabits/core/ui/screens/habits/list/ListHabitsMenuBehaviorTest.kt",
+    "uhabits-core/src/commonTest/kotlin/org/isoron/uhabits/core/ui/screens/habits/show/views/HistoryCardPresenterTest.kt",
+    "uhabits-core/src/commonTest/kotlin/org/isoron/uhabits/core/ui/widgets/WidgetBehaviorTest.kt",
+]
+check = "./gradlew --quiet :uhabits-core:jvmTest :uhabits-android:compileDebugKotlin :uhabits-android:compileDebugAndroidTestKotlin"
+prompt = """
+Unanswered and No must never look alike again.
+
+- The setting goes away. The "Show question marks for missing data" setting disappears and the app behaves as if it were always on.
+- Tapping cycles through every state. In the habit list, on the Calendar card and on checkmark widgets, each tap moves to the next state: Unanswered → Yes → Skip → No → Unanswered. With Skip disabled, the cycle is Unanswered → Yes → No → Unanswered.
+- The list shows each state differently.
+  - Unanswered: a quiet dot.
+  - No: a clearly visible ✕.
+  - Rest day: keeps its outlined check.
+  - Measurable habits: Unanswered shows the dot, and an entered 0 shows "0".
+- Dialogs can always reset a day. The long-press dialogs always offer resetting a day to Unanswered.
+- The filter matches the new meaning. It is labelled "Hide answered".
+- Screen readers hear the difference too. Each list cell announces its day and state, and the dialog buttons announce what they do.
+
+This gets the meaning right; final colours come later with a Material 3 theme.
+
+Acceptance criteria:
+- "Show question marks for missing data" no longer appears in Settings, and a previously stored value has no effect.
+- Tapping follows Unanswered → Yes → Skip → No → Unanswered with Skip enabled, and Unanswered → Yes → No → Unanswered with Skip disabled. This holds in the habit list, on the Calendar card and on checkmark widgets.
+- In the habit list, a Yes/No habit's Unanswered day shows a small filled dot (4dp across), and a No shows the ✕ more prominently than the dot. Rest day, Yes and Skip look as before.
+- In the habit list, a Measurable habit's Unanswered day shows the same dot instead of "0" or "?", and an entered 0 still shows "0".
+- Checkmark widgets show the same marks as the list.
+- The checkmark and number dialogs always show the reset-to-Unanswered button, which keeps its "?" glyph.
+- The list filter menu item always reads "Hide answered" in English and hides every habit answered today in any way. A Rest day counts as answered. Only the English text of the existing string key changes, so other translations keep working.
+- Each list cell exposes an accessibility description with its day and state, e.g. "Tue 27, No" or "Tue 27, Unanswered". A Measurable cell announces its value.
+- The checkmark and number dialogs' glyph buttons are labelled for screen readers as Yes, No, Skip and "Clear answer".
+- Score and streaks are unchanged, and Unanswered still counts as No.
+- The Entry model and its toggle logic are unchanged (ADR-0001).
+- Core tests assert the stored Entry after each tap, with Skip on and off, through the list behaviour, the widget behaviour and Calendar card presses. They also check the "Hide answered" filter through the list menu behaviour.
+- For now, the dot and ✕ use the existing low- and medium-contrast colours.
+- The Android view tests need an emulator; leave them compiling, and say which reference images a human must review.
+
+The acceptance tests call ListHabitsBehavior.onToggle(habit, date, shownValue, x, y): Int. It records the answer that follows shownValue, the answer the tapped cell shows, in the tap cycle, and returns it, so that the cell can show it before the list refreshes and quick taps keep moving forward.
+"""

@@ -24,6 +24,8 @@ MARKETPLACE = REPO_ROOT / ".claude-plugin" / "marketplace.json"
 PLUGIN_ROOT = REPO_ROOT / "plugins" / "opus-orchestrator"
 PLUGIN_MANIFEST = PLUGIN_ROOT / ".claude-plugin" / "plugin.json"
 SKILL = PLUGIN_ROOT / "skills" / "orchestrate" / "SKILL.md"
+# The minimal pointer the test cases measure the skill against; it stays a working skill.
+POINTER_SKILL = PLUGIN_ROOT / "test-cases" / "pointer-skill" / "SKILL.md"
 MODEL_NOTES = PLUGIN_ROOT / "skills" / "orchestrate" / "model-notes.md"
 WRAPPER = PLUGIN_ROOT / "scripts" / "orchestrator.py"
 RESULT_SCHEMA = PLUGIN_ROOT / "schemas" / "result.schema.json"
@@ -100,20 +102,26 @@ def frontmatter(path: Path) -> tuple[dict[str, str], str]:
 
 
 def check_skill() -> list[str]:
-    fields, body = frontmatter(SKILL)
-    problems = []
-    if not fields:
-        return ["SKILL.md: no frontmatter"]
-    if fields.get("disable-model-invocation") != "true":
-        problems.append("SKILL.md: disable-model-invocation must be true (user-invoked only)")
-    if fields.get("user-invocable", "true") != "true":
-        problems.append("SKILL.md: the user must be able to invoke the skill")
-    if not fields.get("description"):
-        problems.append("SKILL.md: description is missing")
-    if "!`${CLAUDE_PLUGIN_ROOT}/scripts/orchestrator.py start-run`" not in body:
-        problems.append("SKILL.md: the body must run the wrapper's start-run through shell injection")
+    problems = skill_problems(SKILL) + skill_problems(POINTER_SKILL)
     if not os.access(WRAPPER, os.X_OK):
         problems.append("scripts/orchestrator.py must be executable")
+    return problems
+
+
+def skill_problems(path: Path) -> list[str]:
+    fields, body = frontmatter(path)
+    name = path.relative_to(PLUGIN_ROOT)
+    if not fields:
+        return [f"{name}: no frontmatter"]
+    problems = []
+    if fields.get("disable-model-invocation") != "true":
+        problems.append(f"{name}: disable-model-invocation must be true (user-invoked only)")
+    if fields.get("user-invocable", "true") != "true":
+        problems.append(f"{name}: the user must be able to invoke the skill")
+    if not fields.get("description"):
+        problems.append(f"{name}: description is missing")
+    if "!`${CLAUDE_PLUGIN_ROOT}/scripts/orchestrator.py start-run`" not in body:
+        problems.append(f"{name}: the body must run the wrapper's start-run through shell injection")
     return problems
 
 
@@ -203,7 +211,7 @@ def check_markdown_links() -> list[str]:
 CHECKS: list[tuple[str, Callable[[], list[str]]]] = [
     ("plugin manifest", check_plugin_manifest),
     ("marketplace entry", check_marketplace),
-    ("orchestrate skill", check_skill),
+    ("orchestrate skill and its minimal pointer", check_skill),
     ("Model notes date", check_model_notes),
     ("Result schema", check_result_schema),
     ("local Markdown links", check_markdown_links),
