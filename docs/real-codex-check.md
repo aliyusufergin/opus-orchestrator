@@ -25,17 +25,23 @@ The wrapper run against the real Codex, to confirm the assumptions behind the fa
 
 Also checked: resuming the writing Delegate (d11 resumes d2). Codex continued the same thread: the resumed `thread.started` event repeats its id. The diff against the original Snapshot held both rounds.
 
-## Failed assumptions, for the user to decide
+## Failed assumptions and the user's decisions
 
 ### A timed-out Delegate's commands outlive it
 
 The wrapper ends Codex's process group on timeout (`run_process_group`), assuming that this ends everything Codex started. On Linux, Codex runs each command through `codex-linux-sandbox` in a new session and PID namespace. So the sandboxed command isn't in the process group: it is reparented to init and runs on after the wrapper exits, here a `sleep 300` in the worktree that had been removed. With a network grant, or with a long build, such a leftover would keep using the network or the CPU unseen.
 
-No fallback is recorded. Possible directions: make the wrapper a child subreaper (`PR_SET_CHILD_SUBREAPER`) and end every descendant; or run Codex in a cgroup or a systemd scope that can be killed whole; or accept the leftover and have the evidence name it.
+No fallback was recorded. The directions offered were:
+
+- make the wrapper a child subreaper (`PR_SET_CHILD_SUBREAPER`) and end every descendant;
+- run Codex in a cgroup or a systemd scope that can be killed whole;
+- accept the leftover and have the evidence name it.
+
+**Decided on 2026-10-09:** the wrapper tracks every process Codex starts and ends them all, as a child subreaper, without new dependencies. Issue #23.
 
 ### The wrapper has no network grant
 
-Issue #1 lists "an optional network grant" among `delegate`'s inputs, and ADR 0006 keeps the network off "unless the Contract grants it". The wrapper always passes `sandbox_workspace_write.network_access=false`, and the read-only sandbox has no network, so no Delegation can get it. Codex's own setting works (item 7), so a grant is a small wrapper change for writing Delegations; whether the read-only sandbox can take a grant wasn't checked. The decision is whether to add the grant, and in what form.
+Issue #1 lists "an optional network grant" among `delegate`'s inputs, and ADR 0006 keeps the network off "unless the Contract grants it". The wrapper always passes `sandbox_workspace_write.network_access=false`, and the read-only sandbox has no network, so no Delegation can get it. Codex's own setting works (item 7), so a grant is a small wrapper change for writing Delegations; whether the read-only sandbox can take a grant wasn't checked. **Decided on 2026-10-09:** add a network grant to `delegate` for writing Delegations, and check against the real Codex whether a read-only one can take it. Issue #24.
 
 ## Other observations
 
