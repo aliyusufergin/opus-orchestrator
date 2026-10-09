@@ -60,3 +60,5 @@ The skill approves wrapper calls only for the turn that starts the Run. In auto 
 `scripts/verify.sh` runs what CI runs: the wrapper tests and the package checks. The package checks need `jsonschema` (`pip install -r requirements-dev.txt`).
 
 The tests drive the wrapper's command line in temporary Git repositories against a fake Codex, [tests/fake_codex.py](tests/fake_codex.py). It is selected through the `OPUS_ORCHESTRATOR_CODEX` environment variable, which replaces the Codex executable. Its scenarios are built from recorded Codex output; see [tests/fixtures/codex](tests/fixtures/codex/README.md).
+
+The [test cases](plugins/opus-orchestrator/test-cases/README.md) measure the skill against Opus alone and against Opus with the wrapper and a minimal pointer, on five tasks from real repositories, each in a throwaway clone. They spend Claude and ChatGPT Quota, so they run by hand, not in CI.
