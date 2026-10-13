@@ -2,7 +2,7 @@
 
 The test cases measure whether the skill earns its place against baselines ([ADR 0001](../../../docs/adr/0001-free-method-explicit-interface-invariants-in-code.md)). Each runs once per configuration, at the same effort, and spends Claude Quota and, with the plugin, ChatGPT Quota. They don't run in CI.
 
-The five tasks are in [tasks.toml](tasks.toml). Each one names the repository it is cloned from, the commit to start from, the prompt and either a check or a known answer. The first round is `bug-fix`, `investigation` and `parallel-feature`; its baseline runs and the gaps they showed are in [docs/baseline-round.md](../../../docs/baseline-round.md).
+The five tasks are in [tasks.toml](tasks.toml). Each one names the repository it is cloned from, the commit to start from, the prompt and either a check or a known answer. The first round is `bug-fix`, `investigation` and `parallel-feature`; its baseline runs and the gaps they showed are in [docs/baseline-round.md](../../../docs/baseline-round.md), and the skill's runs against them in [docs/skill-round.md](../../../docs/skill-round.md).
 
 ## Configurations
 

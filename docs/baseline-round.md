@@ -83,4 +83,4 @@ Apart from these, the wrapper worked as designed in every run: Snapshots, worktr
 
 - One run per configuration, at medium effort. Wall times include contention: the four n8n runs ran together on four CPUs, and `parallel-feature` `alone` started while `investigation` `pointer` was still running.
 - The `investigation` grades are Claude's, at the user's request.
-- The `skill` configuration isn't part of this round. It is measured in the skill round, issue #13.
+- The `skill` configuration isn't part of this round. It is measured in the [skill round](skill-round.md), issue #13.
