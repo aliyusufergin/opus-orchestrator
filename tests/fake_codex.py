@@ -8,6 +8,10 @@ names and the files it found in its working directory, then plays back a
 scenario from tests/fixtures/codex. The record gives the times it started and,
 once the scenario is played, ended.
 
+With FAKE_CODEX_DETACH set, it first starts `sleep` in a session of its own,
+as `codex-linux-sandbox` runs a Delegate's commands, and records its pid. The
+`sleep` outlives the fake unless something ends it.
+
 `codex exec resume <SESSION_ID> <PROMPT>` is recorded as the `exec resume`
 subcommand, with the session id and prompt as its positionals. The options of
 `codex exec` that `resume` lacks are accepted only before `resume`, as Codex
@@ -19,12 +23,14 @@ Environment:
   FAKE_CODEX_SCENARIO  scenario directory to play back
   FAKE_CODEX_CATALOG   catalog file for `codex debug models`
   FAKE_CODEX_RECORD    directory to write the invocation record into
+  FAKE_CODEX_DETACH    seconds the detached `sleep` runs, if one is started
 """
 
 from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -185,6 +191,16 @@ def main(argv: list[str]) -> int:
             print("Reading additional input from stdin...", file=sys.stderr)
         stdin_text = sys.stdin.read()
 
+    detached_pid = None
+    if os.environ.get("FAKE_CODEX_DETACH"):
+        detached_pid = subprocess.Popen(
+            ["sleep", os.environ["FAKE_CODEX_DETACH"]],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        ).pid
+
     invocation: dict[str, object] = {
         "argv": argv,
         "subcommand": subcommand,
@@ -196,6 +212,7 @@ def main(argv: list[str]) -> int:
         "files": files_in(Path.cwd()),
         "pid": os.getpid(),
         "started_at": started_at,
+        "detached_pid": detached_pid,
     }
     record(invocation)
 

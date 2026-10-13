@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 
-from support import WritingDelegationTestCase, stdout_field
+from support import WritingDelegationTestCase, process_exists, stdout_field
 
 
 class TimeoutLimitTest(WritingDelegationTestCase):
@@ -86,10 +85,3 @@ class TimeoutTest(WritingDelegationTestCase):
         pid = int(next(self.codex_records.glob("*.json")).stem)
         self.assertFalse(process_exists(pid), f"fake Codex {pid} is still running")
 
-
-def process_exists(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    return True

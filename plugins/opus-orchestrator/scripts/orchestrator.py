@@ -11,6 +11,7 @@ Commands:
 from __future__ import annotations
 
 import argparse
+import ctypes
 import fcntl
 import itertools
 import json
@@ -50,8 +51,12 @@ MAX_TIMEOUT_MINUTES = 60
 MAX_CONCURRENT_DELEGATIONS = 3
 # How often a Delegation waiting for a slot tries again.
 SLOT_POLL_SECONDS = 0.1
-# How long a stopped process group gets to exit before it is killed.
+# How long stopped processes get to exit before they are killed, and how long killing them may take.
 STOP_GRACE_SECONDS = 5
+# How often the wrapper looks again for processes it is waiting to end.
+STOP_POLL_SECONDS = 0.05
+# prctl(2) option: orphans among the caller's descendants are reparented to it rather than to init.
+PR_SET_CHILD_SUBREAPER = 36
 # `ultra` is xhigh plus automatic subagent delegation, which Delegates never get (ADR 0001).
 REFUSED_EFFORTS = {"ultra"}
 
@@ -838,42 +843,130 @@ def run_process_group(
     stdout: IO[bytes],
     stderr: IO[bytes] | int,
 ) -> int | None:
-    """Run `command` in a process group of its own, which is ended afterwards whatever happens.
+    """Run `command` in a process group of its own; afterwards, whatever happens, every process it
+    started is ended, also ones in a session or PID namespace of their own.
 
     Returns its exit code, or None when it ran past `timeout` seconds.
     """
-    process = subprocess.Popen(
-        command,
-        cwd=cwd,
-        stdin=subprocess.DEVNULL if input is None else subprocess.PIPE,
-        stdout=stdout,
-        stderr=stderr,
-        start_new_session=True,
-    )
+    with child_subreaper():
+        process = None
+        try:
+            # Inside the `try`, so that a signal just after it starts still ends what it started.
+            process = subprocess.Popen(
+                command,
+                cwd=cwd,
+                stdin=subprocess.DEVNULL if input is None else subprocess.PIPE,
+                stdout=stdout,
+                stderr=stderr,
+                start_new_session=True,
+            )
+            process.communicate(input, timeout=timeout)
+            return process.returncode
+        except subprocess.TimeoutExpired:
+            return None
+        finally:
+            # A SIGTERM or SIGHUP now would cut the ending short; it is handled once all have ended.
+            blocked = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM, signal.SIGHUP})
+            try:
+                end_descendants(process)
+            finally:
+                signal.pthread_sigmask(signal.SIG_SETMASK, blocked)
+
+
+@contextmanager
+def child_subreaper() -> Iterator[None]:
+    """Be a child subreaper meanwhile, so that what `command` leaves behind stays the wrapper's to end.
+
+    Codex runs each command through `codex-linux-sandbox` in a new session and PID namespace, out
+    of its process group; as a subreaper the wrapper still sees them as descendants. Only meanwhile,
+    so that what Git leaves running in the background isn't ended with a Delegation.
+    """
+    error = set_child_subreaper(True)
+    if error:
+        raise WrapperError(f"cannot make the wrapper a child subreaper: {os.strerror(error)}")
     try:
-        process.communicate(input, timeout=timeout)
-        return process.returncode
-    except subprocess.TimeoutExpired:
-        return None
+        yield
     finally:
-        end_process_group(process)
+        # Can't fail once setting it succeeded; and an error here mustn't hide the one being raised.
+        set_child_subreaper(False)
 
 
-def end_process_group(process: subprocess.Popen[bytes]) -> None:
-    """Ask the process group to stop, then kill what is left of it: also processes it left behind."""
-    try:
-        os.killpg(process.pid, signal.SIGTERM)
-    except ProcessLookupError:
-        return
-    try:
-        process.wait(timeout=STOP_GRACE_SECONDS)
-    except subprocess.TimeoutExpired:
-        pass
-    try:
-        os.killpg(process.pid, signal.SIGKILL)
-    except ProcessLookupError:
-        pass
-    process.wait()
+def set_child_subreaper(on: bool) -> int:
+    """Returns 0, or the errno prctl(2) failed with."""
+    libc = ctypes.CDLL(None, use_errno=True)
+    return 0 if libc.prctl(PR_SET_CHILD_SUBREAPER, int(on), 0, 0, 0) == 0 else ctypes.get_errno()
+
+
+def end_descendants(process: subprocess.Popen[bytes] | None) -> None:
+    """Ask every process descended from the wrapper to stop, then kill those still running.
+
+    `process` is the wrapper's own child, None if it never started; any other descendant that outlives its parent becomes
+    the wrapper's child too, and is reaped here.
+    """
+    signal_all(descendants(), signal.SIGTERM)
+    deadline = time.monotonic() + STOP_GRACE_SECONDS
+    while (running := reap(process)) and time.monotonic() < deadline:
+        time.sleep(STOP_POLL_SECONDS)
+    # A process may start another while it is killed, so kill until none is left.
+    deadline = time.monotonic() + STOP_GRACE_SECONDS
+    while running and time.monotonic() < deadline:
+        signal_all(running, signal.SIGKILL)
+        time.sleep(STOP_POLL_SECONDS)
+        running = reap(process)
+    if running:
+        print(
+            f"orchestrator: processes {', '.join(map(str, sorted(running)))} could not be ended",
+            file=sys.stderr,
+        )
+
+
+def signal_all(pids: Iterable[int], signum: int) -> None:
+    for pid in pids:
+        try:
+            os.kill(pid, signum)
+        except (ProcessLookupError, PermissionError):
+            # Gone already, or one the wrapper may not signal, such as a setuid one: if it stays,
+            # end_descendants names it.
+            pass
+
+
+def reap(process: subprocess.Popen[bytes] | None) -> set[int]:
+    """Reap the wrapper's children that have exited; returns the descendants still running."""
+    if process is not None:
+        process.poll()  # Popen reaps its own, so that it keeps the exit code.
+    running = set()
+    for pid, (state, parent) in descendants().items():
+        if state != "Z":
+            running.add(pid)
+        elif parent == os.getpid() and (process is None or pid != process.pid):
+            os.waitpid(pid, os.WNOHANG)
+    return running
+
+
+def descendants() -> dict[int, tuple[str, int]]:
+    """The wrapper's descendants, from /proc: each pid with its state and parent's pid."""
+    children: dict[int, list[tuple[int, str]]] = {}
+    for entry in Path("/proc").iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            stat = (entry / "stat").read_text()
+        except OSError:
+            continue  # It exited meanwhile.
+        # The command name, in parentheses, may itself hold spaces and parentheses.
+        state, ppid = stat[stat.rindex(")") + 2 :].split()[:2]
+        children.setdefault(int(ppid), []).append((int(entry.name), state))
+    found: dict[int, tuple[str, int]] = {}
+    parents = [os.getpid()]
+    while parents:
+        parent = parents.pop()
+        for child, child_state in children.get(parent, []):
+            # Pids reused while /proc was read could otherwise make a cycle.
+            if child in found:
+                continue
+            found[child] = (child_state, parent)
+            parents.append(child)
+    return found
 
 
 def read_json_object(path: Path) -> dict[str, Any] | None:

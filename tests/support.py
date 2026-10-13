@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import subprocess
 import tempfile
 import tomllib
@@ -40,6 +41,7 @@ class CodexCall:
     pid: int | None = None  # `exec` only.
     started_at: float | None = None  # Epoch seconds; `exec` only.
     ended_at: float | None = None  # Epoch seconds, once the scenario was played to its end.
+    detached_pid: int | None = None  # The `sleep` started with FAKE_CODEX_DETACH; `exec` only.
 
     def option(self, name: str) -> str | None:
         values = self.options.get(name, [])
@@ -96,6 +98,8 @@ class WrapperTestCase(unittest.TestCase):
         git(self.repo, "add", "README.md")
         git(self.repo, "commit", "--quiet", "--message", "Initial commit")
         self.codex_records = self.tmp / "codex-calls"
+        # More of the fake Codex's environment, such as FAKE_CODEX_DETACH.
+        self.fake_codex_env: dict[str, str] = {}
 
     def run_wrapper(
         self,
@@ -133,6 +137,7 @@ class WrapperTestCase(unittest.TestCase):
         env["OPUS_ORCHESTRATOR_CODEX"] = str(codex)
         # The test's own Delegation slots, apart from the machine's.
         env["OPUS_ORCHESTRATOR_SLOTS"] = str(self.tmp / "slots")
+        env.update(self.fake_codex_env)
         if model_notes is not None:
             env["OPUS_ORCHESTRATOR_MODEL_NOTES"] = str(model_notes)
         return env
@@ -253,3 +258,19 @@ def stdout_field(stdout: str, label: str) -> str:
         if sep and name == label:
             return value
     raise AssertionError(f"no {label!r} line in output:\n{stdout}")
+
+
+def process_exists(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+def kill_quietly(pid: int) -> None:
+    """Kill a process a test left behind, should it still be running."""
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
