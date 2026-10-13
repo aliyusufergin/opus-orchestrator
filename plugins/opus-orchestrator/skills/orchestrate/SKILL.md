@@ -18,14 +18,14 @@ Before your first Delegation, show the user a short plan of what you'll do yours
 
 Every Delegation has a fixed price: Codex adds about 14K–25K tokens of harness overhead, and you spend Claude Quota writing the task part and reading the Result back. It pays only when it replaces reading and iterating you would otherwise do yourself.
 
-- Decide before you read deeply. Once you have read what a fix needs, that reading is paid for, and finishing the work yourself is cheaper than briefing someone else. In the baseline, two tasks Opus alone finished in about 40 seconds cost 41–46% more Claude Quota and two to eight times the wall time when delegated after reading.
+- Decide before you read deeply. Once you have read what a fix needs, that reading is paid for, and finishing the work yourself is cheaper than briefing someone else. In the baseline, two tasks Opus alone finished in about 40 seconds cost 41–46% more Claude Quota and two to eight times the wall time when delegated: one after Opus had already read what the fix needed, the other followed by Opus reading the code anyway.
 - Work you can settle by reading a couple of files and making a small edit is yours. So is tightly coupled work, where explaining the coupling costs as much as the change.
 - Work worth delegating: read-heavy investigation, self-contained implementation with criteria a Check can show, mechanical high-volume edits that have a Check, and Second opinions. On the baseline's large feature, delegating cut Claude Quota by about two-thirds.
 - While a Delegate runs, don't do its work in parallel. In the baseline, Opus read the code a read-only Delegate was investigating, so the Delegation bought almost nothing. Use the time for other parts of the task, the next task part, or simply wait for the notification.
 
 ## Splitting the work
 
-Up to three Delegations run at once, and each writing Delegation gets its own worktree from the same Snapshot, so parts with separate Write scopes can be written in parallel. In the baseline, a feature with three independent parts went to one Delegate at xhigh; it ran for 16 minutes, 1.6 times as long as Opus alone, and nothing overlapped.
+Up to three Delegations run at once, and each writing Delegation gets its own worktree from the same Snapshot, so parts with separate Write scopes can be written in parallel. In the baseline, a feature with three independent parts went to one Delegate at xhigh; nothing overlapped, and the Run took 1.6 times as long as Opus alone.
 
 - Look for parts that touch separate files: core logic and its tests, the views, the widgets. Give each its own Delegation, and fix the interfaces between them yourself in each task part, since interfaces are your decision.
 - Write scopes of Delegations that run at the same time shouldn't overlap: every diff applies to one working tree, and overlapping diffs conflict.
@@ -68,7 +68,7 @@ ${CLAUDE_PLUGIN_ROOT}/scripts/orchestrator.py delegate --run <Run id> --task <ta
 
 Choose the model and effort from the [Model notes](model-notes.md): each model's default effort, when to change it, what it's for, what to avoid and its relative Quota cost. They rest on measured data, which your training doesn't have. The list above is Codex's live catalog; a warning above it means the notes may be stale, so lean on the catalog's own descriptions for what they don't cover. The wrapper refuses `ultra` and any model or effort the catalog lacks.
 
-Use `gpt-6-astra` only when the user's arguments above include `--allow-astra`. Astra costs seven to eleven times GPT-6.1 Sol per task, Plus allows only 5–45 Astra messages in five hours, and it's the user's own Codex default, so a Delegation on it competes with their interactive work. Nothing in the wrapper stops it; the user relies on you, and on the report, which marks every Astra Delegation. Without the flag, hard pieces go to GPT-6.1 Sol at xhigh or to you.
+Use `gpt-6-astra` only when the user's arguments above include `--allow-astra`. Astra costs several times GPT-6.1 Sol per task (see the Model notes), Plus allows only 5–45 Astra messages in five hours, and it's the user's own Codex default, so a Delegation on it competes with their interactive work. Nothing in the wrapper stops it; the user relies on you, and on the report, which marks every Astra Delegation. Without the flag, hard pieces go to GPT-6.1 Sol at xhigh or to you.
 
 ## Judging a Result
 
@@ -77,7 +77,7 @@ The Result is the Delegate's account; `evidence.json` is the wrapper's. Where th
 - `check_reruns` holds each Check's exit code and output tail from the wrapper's own rerun; trust it over the Result's `checks`. An exit code of `null` means the Check ran past its timeout. A `partial` Result whose reruns all pass may still be acceptable; say why in the report.
 - `outside_write_scope` lists changed paths outside the Write scope. The wrapper flags them but doesn't remove them, and `apply` takes the whole diff, so settle them before applying.
 - `diff` names the diff against the Snapshot: that, not `changed_files`, is what you'd apply.
-- Review the diff yourself, or with a Claude Subagent for a large one, before applying. Claude reviewing GPT-written code is the direction in which review is shown to help. Give the tests the same attention as the code: a test that passes without the change shows nothing, and in the baseline the Delegate's tests were the part only skimmed.
+- Review the diff yourself, or with a Claude Subagent for a large one, before applying. That is the direction in which cross-model review is shown to help (see Second opinions). Give the tests the same attention as the code: a test that passes without the change shows nothing, and in the baseline the Delegate's tests were the part only skimmed.
 - For a read-only Delegation, spot-check the claims and citations that matter to your decision rather than answering the question again yourself.
 - A `blocked` Result carries the smallest question that would unblock it. Answer it yourself if it's yours to decide; otherwise ask the user, since every question reaches the user through you.
 

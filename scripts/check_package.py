@@ -51,8 +51,9 @@ SCHEMA_KEYWORDS = {
     "anyOf",
 }
 # The orchestrate skill's length budget, checked on its body without the frontmatter.
-SKILL_LINES = (80, 200)
-SKILL_MAX_WORDS = 3500
+SKILL_MIN_LINES = 80
+SKILL_MAX_LINES = 200
+SKILL_MAX_WORDS = 3000
 KEBAB_CASE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 
 
@@ -113,14 +114,15 @@ def check_skill() -> list[str]:
 
 def check_skill_length() -> list[str]:
     """The skill's body stays short guidance (ADR 0001): 80–200 lines of text, and within the
-    5,000 tokens Claude Code re-attaches after compaction, taken as about 3,500 words."""
+    3,000 words, which leaves room for Gotchas and the start-run output inside the 5,000
+    tokens Claude Code re-attaches after compaction."""
     _, body = frontmatter(SKILL)
     lines = [line for line in body.splitlines() if line.strip()]
     words = len(body.split())
     problems = []
-    if not SKILL_LINES[0] <= len(lines) <= SKILL_LINES[1]:
+    if not SKILL_MIN_LINES <= len(lines) <= SKILL_MAX_LINES:
         problems.append(
-            f"SKILL.md: the body has {len(lines)} non-blank lines; the budget is {SKILL_LINES[0]}–{SKILL_LINES[1]}"
+            f"SKILL.md: the body has {len(lines)} non-blank lines; the budget is {SKILL_MIN_LINES}–{SKILL_MAX_LINES}"
         )
     if words > SKILL_MAX_WORDS:
         problems.append(f"SKILL.md: the body has {words} words; the budget is at most {SKILL_MAX_WORDS}")
