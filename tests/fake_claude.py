@@ -2,8 +2,8 @@
 """A fake `claude` for the test-case runner's tests.
 
 It records what it received and the state of the clone it ran in, makes the edits a test
-asks for, leaves Delegations' evidence in the clone's Run record as the wrapper would,
-and prints a headless JSON result.
+asks for, leaves Delegations' evidence in the clone's Run record through the wrapper's own
+code, and prints a headless JSON result.
 
 Environment:
 - FAKE_CLAUDE_RECORD: the file to write the record of this call to (JSON).
@@ -20,6 +20,9 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "plugins" / "opus-orchestrator" / "scripts"))
+import orchestrator  # noqa: E402
 
 
 def git(*args: str) -> str:
@@ -53,12 +56,12 @@ def main() -> int:
     for path, content in json.loads(os.environ.get("FAKE_CLAUDE_EDITS", "{}")).items():
         Path(path).write_text(content)
 
-    git_dir = Path(git("rev-parse", "--path-format=absolute", "--git-common-dir"))
-    for number, usage in enumerate(json.loads(os.environ.get("FAKE_CLAUDE_USAGE", "[]")), start=1):
-        delegation = git_dir / "opus-orchestrator" / "runs" / "run-1" / "delegations" / f"d{number}"
-        delegation.mkdir(parents=True)
-        evidence = {"model": "gpt-6.1-sol", "effort": "medium", "usage": usage}
-        (delegation / "evidence.json").write_text(json.dumps(evidence))
+    usages = json.loads(os.environ.get("FAKE_CLAUDE_USAGE", "[]"))
+    if usages:
+        run_dir = orchestrator.create_first_free(orchestrator.runs_dir(Path.cwd()), ["run-1"])
+        for usage in usages:
+            evidence = {"model": "gpt-6.1-sol", "effort": "medium", "usage": usage}
+            orchestrator.write_json(orchestrator.new_delegation(run_dir) / "evidence.json", evidence)
 
     print(json.dumps({
         "type": "result",
