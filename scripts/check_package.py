@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Package checks: the plugin manifest, the marketplace entry, the orchestrate
-skill's frontmatter, the Model notes date, the Result schema and local Markdown links.
+skill's frontmatter and length budget, the Model notes date, the Result schema and local Markdown links.
 
 Prints each failure and exits 1 if there is any.
 """
@@ -50,6 +50,10 @@ SCHEMA_KEYWORDS = {
     "items",
     "anyOf",
 }
+# The orchestrate skill's length budget, checked on its body without the frontmatter.
+SKILL_MIN_LINES = 80
+SKILL_MAX_LINES = 200
+SKILL_MAX_WORDS = 3000
 KEBAB_CASE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 
 
@@ -105,6 +109,23 @@ def check_skill() -> list[str]:
     problems = skill_problems(SKILL) + skill_problems(POINTER_SKILL)
     if not os.access(WRAPPER, os.X_OK):
         problems.append("scripts/orchestrator.py must be executable")
+    return problems
+
+
+def check_skill_length() -> list[str]:
+    """The skill's body stays short guidance (ADR 0001): 80–200 lines of text, and within the
+    3,000 words, which leaves room for Gotchas and the start-run output inside the 5,000
+    tokens Claude Code re-attaches after compaction."""
+    _, body = frontmatter(SKILL)
+    lines = [line for line in body.splitlines() if line.strip()]
+    words = len(body.split())
+    problems = []
+    if not SKILL_MIN_LINES <= len(lines) <= SKILL_MAX_LINES:
+        problems.append(
+            f"SKILL.md: the body has {len(lines)} non-blank lines; the budget is {SKILL_MIN_LINES}–{SKILL_MAX_LINES}"
+        )
+    if words > SKILL_MAX_WORDS:
+        problems.append(f"SKILL.md: the body has {words} words; the budget is at most {SKILL_MAX_WORDS}")
     return problems
 
 
@@ -212,6 +233,7 @@ CHECKS: list[tuple[str, Callable[[], list[str]]]] = [
     ("plugin manifest", check_plugin_manifest),
     ("marketplace entry", check_marketplace),
     ("orchestrate skill and its minimal pointer", check_skill),
+    ("orchestrate skill's length budget", check_skill_length),
     ("Model notes date", check_model_notes),
     ("Result schema", check_result_schema),
     ("local Markdown links", check_markdown_links),
