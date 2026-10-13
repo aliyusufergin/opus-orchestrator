@@ -86,3 +86,22 @@ Each Delegate ran `curl https://example.com`, the same request through Python's 
 | 13 | A resumed Delegation keeps the grant | d3, `exec resume` of d2 with the same profile options, reached example.com (exit 0), and `touch` still failed (exit 1). Its evidence records `network: true`. | yes |
 
 `report` marked all three Delegations `NETWORK`.
+
+## 2026-10-13: local sockets and Gradle in the sandbox
+
+The baseline round (issue #11, [baseline-round.md](baseline-round.md)) gave a writing Delegation three Gradle Checks without a network grant, and the Delegate couldn't start Gradle (issue #30). Checked here with `codex sandbox`, without a model, in a clone of `loop-habit-tracker-next` whose Gradle distribution and dependencies are cached in `~/.gradle`.
+
+- **Codex CLI:** 0.159.2; Linux
+- **Where:** the kept clone of the baseline round's `parallel-feature` `pointer` run
+- **Run:** no Delegations; `codex sandbox` ran a Python script that binds and listens on `127.0.0.1`, then `:uhabits-core:jvmTest`
+- **Token usage:** none
+- **Evidence:** the terminal output of the probes, quoted below; nothing else is kept
+
+| # | Assumption | Observed | Holds |
+| --- | --- | --- | --- |
+| 14 | Without network, a Delegate's commands can still use loopback sockets | Binding on `127.0.0.1` failed with `PermissionError: [Errno 1] Operation not permitted` in the workspace-write sandbox with `network_access=false` and in the read-only sandbox. It succeeded with the network grant, both writing and read-only (the `read_only_network` profile). Gradle without the grant stopped at "Could not determine a usable wildcard IP for this machine." | **no** |
+| 15 | With the grant, Gradle runs in a writing Delegate's worktree | `./gradlew --offline` failed with `Read-only file system` on its lock file under `~/.gradle/wrapper/dists`: the home directory is read-only in the sandbox. With `GRADLE_USER_HOME` under the worktree's `build/`, `GRADLE_RO_DEP_CACHE=~/.gradle/caches` and the distribution's own `bin/gradle --offline`, `:uhabits-core:jvmTest` passed in 73 s. The same command without the grant failed on the wildcard IP again. | with a writable Gradle home only |
+
+**Decided on 2026-10-13:** the skill tells the Orchestrator to grant `--network` when a Check needs a local socket, naming that as what the network is for, and accepts that the grant also opens the internet. Issue #30.
+
+**Added while carrying out that decision, from item 15:** the skill also says that the home directory is read-only to a Delegate, so a tool's cache has to go under the worktree's ignored build output, and names the Gradle settings above. The wrapper's Check reruns run outside the sandbox and need neither. The Gradle settings rely on the distribution and dependencies already being in `~/.gradle`; on a machine without them, an offline build in the sandbox can't fetch them.
