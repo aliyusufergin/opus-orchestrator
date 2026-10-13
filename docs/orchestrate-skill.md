@@ -1,6 +1,6 @@
 # Where the orchestrate skill's guidance comes from
 
-The [orchestrate skill](../plugins/opus-orchestrator/skills/orchestrate/SKILL.md) holds only guidance that closes a gap the [baseline round](baseline-round.md) or the [skill round](skill-round.md) showed, or that the spec (issue #1) requires as a prose rule ([ADR 0001](adr/0001-free-method-explicit-interface-invariants-in-code.md)). This table traces each piece to its source, for issue #12. When either side ships a new model, the test cases are rerun and a piece whose gap no longer shows is pruned.
+The [orchestrate skill](../plugins/opus-orchestrator/skills/orchestrate/SKILL.md) holds only guidance that closes a gap the [baseline round](baseline-round.md) or the [skill round](skill-round.md) showed, or that the spec (issue #1) requires as a prose rule ([ADR 0001](adr/0001-free-method-explicit-interface-invariants-in-code.md)). This table traces each piece to its source, for issues #12 and #13. When either side ships a new model, the test cases are rerun and a piece whose gap no longer shows is pruned.
 
 "Gap" means a numbered gap in the baseline round unless the skill round is named; "story" means a user story in the spec. The wrapper mechanics carried over from the minimal pointer are the interface to the wrapper, specified in the spec's Implementation Decisions.
 
@@ -34,5 +34,5 @@ The [orchestrate skill](../plugins/opus-orchestrator/skills/orchestrate/SKILL.md
 | The final report | The `report` table, plus what it can't show | Stories 4, 36 and 44; gap 6 |
 | Gotchas | The sandbox refuses loopback sockets without `--network` | Gap 5; issue #30 |
 | Gotchas | A read-only home directory and Gradle's cache | Issue #30; item 15 of [the real-Codex check](real-codex-check.md) |
-| Gotchas | `/tmp` and `$TMPDIR` are read-only to a writing Delegate | [Skill round](skill-round.md), gap 6 |
-| Gotchas | Delegated tests test your account, not the user's criteria | Skill round, gap 2: the failed `parallel-feature` check |
+| Gotchas | `/tmp` and `$TMPDIR` are read-only to a writing Delegate | [Skill round](skill-round.md) gap 6; issue #13 |
+| Gotchas | Delegated tests test your account, not the user's criteria | Skill round gap 2; issue #13 |

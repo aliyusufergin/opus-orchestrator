@@ -2,7 +2,7 @@
 
 Test cases 1, 3 and 5 (`bug-fix`, `investigation`, `parallel-feature`), each run once in the `skill` configuration: Opus with the wrapper and the plugin's own [orchestrate skill](../plugins/opus-orchestrator/skills/orchestrate/SKILL.md), for issue #13. The runs are the three `skill` lines of [results.jsonl](../plugins/opus-orchestrator/test-cases/results.jsonl), recorded on 2026-10-13, and they are compared with the [baseline round](baseline-round.md)'s `alone` and `pointer` runs.
 
-**Verdict: the round fails.** The skill passed two of the three tasks, and both baselines passed all three. It used 34% less Claude Quota than Opus alone, so it met the Quota condition but not the pass-rate condition. The gaps below are what the skill is revised from.
+**Verdict: the round fails.** The skill passed two of the three tasks, and both baselines passed all three. It used less Claude Quota than Opus alone (51% fewer Claude tokens, 34% lower cost), so it met the Quota condition but not the pass-rate condition. The gaps below are what the skill is revised from.
 
 ## Setup
 
@@ -19,20 +19,22 @@ Claude's cost is Claude Code's list-price `costUSD`, as in the baseline round: a
 | Task | Config | Passed | Wall time | Claude turns | Claude output tokens | Claude cache reads | Claude cost | Delegations | Codex tokens |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | bug-fix | alone | yes | 39 s | 6 | 2,133 | 143K | $0.33 | — | — |
-| bug-fix | pointer | yes | 89 s | 4 | 3,922 | 331K | $0.46 | 1 | 71,457 in (54,272 cached), 771 out |
+| bug-fix | pointer | yes | 89 s | 4 | 3,922 | 331K | $0.46 | 1: gpt-6.1-sol low, `done`, 39 s | 71,457 in (54,272 cached), 771 out |
 | bug-fix | skill | yes | 53 s | 9 | 3,080 | 255K | $0.42 | none | — |
 | investigation | alone | yes¹ | 37 s | 5 | 2,961 | 134K | $0.35 | — | — |
-| investigation | pointer | yes¹ | 292 s | 3 | 4,819 | 329K | $0.51 | 1 | 286,512 in (226,432 cached), 8,030 out |
+| investigation | pointer | yes¹ | 292 s | 3 | 4,819 | 329K | $0.51 | 1: gpt-6.1-sol medium, read-only, `done`, 247 s | 286,512 in (226,432 cached), 8,030 out |
 | investigation | skill | yes¹ | 270 s | 5 | 4,134 | 267K | $0.43 | 1: gpt-6.1-sol medium, read-only, `done`, 219 s | 292,050 in (230,400 cached), 6,549 out |
 | parallel-feature | alone | yes | 669 s | 58 | 47,931 | 5,593K | $3.21 | — | — |
-| parallel-feature | pointer | yes | 1,087 s | 9 | 12,108 | 971K | $1.02 | 1 | 3,518,417 in (3,373,696 cached), 28,390 out |
+| parallel-feature | pointer | yes | 1,087 s | 9 | 12,108 | 971K | $1.02 | 1: gpt-6.1-sol xhigh, `partial`, 951 s | 3,518,417 in (3,373,696 cached), 28,390 out |
 | parallel-feature | skill | **no** | 1,094 s | 13 | 21,498 | 2,261K | $1.69 | 2 at once: gpt-6.1-sol medium, core tests, `partial`, 385 s; gpt-6.1-sol xhigh, Android, `done`, 707 s; both `NETWORK` | 3,408,829 in (3,180,416 cached), 28,471 out |
 
-| Config | Passed | Claude cost | Wall time | Codex input tokens |
-| --- | --- | --- | --- | --- |
-| alone | 3 of 3 | $3.88 | 745 s | — |
-| pointer | 3 of 3 | $1.99 | 1,468 s | 3.88M |
-| skill | 2 of 3 | $2.55 (−34% against alone, +28% against pointer) | 1,417 s | 3.70M |
+| Config | Passed | Claude tokens | Claude cost | Wall time | Codex input tokens |
+| --- | --- | --- | --- | --- | --- |
+| alone | 3 of 3 | 6.13M | $3.88 | 745 s | — |
+| pointer | 3 of 3 | 1.81M | $1.99 | 1,468 s | 3.88M |
+| skill | 2 of 3 | 2.99M (−51% against alone, +65% against pointer) | $2.54 (−34% against alone, +28% against pointer) | 1,417 s | 3.70M |
+
+Claude tokens are all four of Claude Code's counts summed: input, cache writes, cache reads and output. Cache reads dominate them, and they are cheap per token, which is why cost, weighting each kind the way the windows roughly do, falls by less.
 
 Per task, the skill's Claude cost against `alone` and `pointer`: `bug-fix` +29% and −9%, `investigation` +25% and −14%, `parallel-feature` −47% and +65%.
 
