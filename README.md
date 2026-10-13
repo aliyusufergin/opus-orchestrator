@@ -2,7 +2,7 @@
 
 A Claude Code plugin in which a Claude Opus session, started by you for a task, hands bounded pieces of the work to OpenAI models through Codex and stays responsible for the outcome. The vocabulary is in [CONTEXT.md](CONTEXT.md) and the decisions are in [docs/adr](docs/adr).
 
-This is an early version. Its skill is a minimal pointer to the wrapper. The full skill will be written from measured gaps.
+This is an early version. Its skill is written from the gaps the [baseline round](docs/baseline-round.md) measured, and [docs/orchestrate-skill.md](docs/orchestrate-skill.md) traces each piece of its guidance to its source. It hasn't yet been measured against the baselines.
 
 ## Requirements
 
