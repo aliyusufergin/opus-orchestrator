@@ -41,7 +41,7 @@ No fallback was recorded. The directions offered were:
 
 ### The wrapper has no network grant
 
-Issue #1 lists "an optional network grant" among `delegate`'s inputs, and ADR 0006 keeps the network off "unless the Contract grants it". The wrapper always passes `sandbox_workspace_write.network_access=false`, and the read-only sandbox has no network, so no Delegation can get it. Codex's own setting works (item 7), so a grant is a small wrapper change for writing Delegations; whether the read-only sandbox can take a grant wasn't checked. **Decided on 2026-10-09:** add a network grant to `delegate` for writing Delegations, and check against the real Codex whether a read-only one can take it. Issue #24.
+Issue #1 lists "an optional network grant" among `delegate`'s inputs, and ADR 0006 keeps the network off "unless the Contract grants it". The wrapper always passes `sandbox_workspace_write.network_access=false`, and the read-only sandbox has no network, so no Delegation can get it. Codex's own setting works (item 7), so a grant is a small wrapper change for writing Delegations; whether the read-only sandbox can take a grant wasn't checked. **Decided on 2026-10-09:** add a network grant to `delegate` for writing Delegations, and check against the real Codex whether a read-only one can take it. Issue #24. **Checked on 2026-10-13:** a read-only one can; see below.
 
 ## Other observations
 
@@ -65,3 +65,24 @@ Rechecks item 9 after issue #23 made the wrapper a child subreaper while Codex o
 | # | Assumption | Observed | Holds |
 | --- | --- | --- | --- |
 | 9 | A timed-out Delegate's sandboxed command is gone once `delegate` returns | While d1 ran, the command ran as `codex exec` → `codex-linux-sandbox` → `bwrap --as-pid-1 --new-session --die-with-parent` → `codex-linux-sandbox` → `sleep 300`, the last two in a session of their own. The wrapper stopped Codex at 60.1 s, wrote a `partial` Result with `failure_kind: timeout`, and removed the worktree. One second after `delegate` returned, none of these processes was running. d2, through the wrapper before the change, also ended in `partial` at 60.0 s, but its inner `codex-linux-sandbox` and `sleep 300` ran on, reparented to init, until ended by hand. | yes |
+
+## 2026-10-13: the network grant
+
+Checks the network grant of issue #24, `delegate --network`, and whether a read-only Delegation can take it.
+
+- **Codex CLI:** 0.159.2, signed in with ChatGPT Plus; Linux
+- **Where:** a throwaway repository with `src/greet.py`
+- **Run:** one Run of 3 Delegations on `gpt-6-luna` at effort `medium`, all with `--network`: d1 writing with Write scope `src`, d2 read-only, and d3 resuming d2. Before the Run, `codex sandbox` (which runs a command in Codex's sandbox without a model) tried the settings without spending Quota.
+- **Token usage:** 153,677 input (95,744 cached) and 1,217 output tokens
+- **Evidence:** the Run record stayed in the throwaway repository and isn't kept. The commands' exit codes and output below come from its `events.jsonl`, not from the Results' `checks`.
+
+Each Delegate ran `curl https://example.com`, the same request through Python's `urllib`, and `touch` on a file in its working directory.
+
+| # | Assumption | Observed | Holds |
+| --- | --- | --- | --- |
+| 10 | The read-only sandbox has no setting of its own for network | Under `codex sandbox` with `sandbox_mode="read-only"`, neither `sandbox_workspace_write.network_access=true` nor `sandbox_read_only.network_access=true` gave network: `curl` exit 6. | yes |
+| 11 | A permissions profile that extends Codex's built-in `:read-only` and enables network gives a read-only Delegation network, and still no writes | The wrapper passes `-c default_permissions="read_only_network"`, `-c permissions.read_only_network.extends=":read-only"` and `-c permissions.read_only_network.network.enabled=true` in place of `--sandbox read-only`. In d2, `curl` and `urllib` reached example.com (exit 0) and `touch` failed with "Read-only file system" (exit 1). Under `codex sandbox`, the same profile with network off had no network, and one extending `:workspace` could write, so `extends` is honoured. A profile without `extends` can't read Codex's own executable. | yes |
+| 12 | The grant gives a writing Delegation network | With `sandbox_workspace_write.network_access=true` and the wrapper's other options, `curl` and `urllib` in d1 reached example.com (exit 0), and `touch src/probe-written.txt` succeeded and came back in the diff. This confirms item 7 through the wrapper itself. | yes |
+| 13 | A resumed Delegation keeps the grant | d3, `exec resume` of d2 with the same profile options, reached example.com (exit 0), and `touch` still failed (exit 1). Its evidence records `network: true`. | yes |
+
+`report` marked all three Delegations `NETWORK`.

@@ -161,10 +161,11 @@ class WrapperTestCase(unittest.TestCase):
         codex: Path = FAKE_CODEX,
         checks: list[str] | None = None,
         timeout: str | None = None,
+        network: bool = False,
     ) -> subprocess.CompletedProcess[str]:
         return self.run_wrapper(
             *self.delegate_args(
-                run_id, task=task, write_scope=write_scope, checks=checks, timeout=timeout
+                run_id, task=task, write_scope=write_scope, checks=checks, timeout=timeout, network=network
             ),
             scenario=scenario,
             stdin=stdin,
@@ -179,6 +180,7 @@ class WrapperTestCase(unittest.TestCase):
         write_scope: list[str] | None = None,
         checks: list[str] | None = None,
         timeout: str | None = None,
+        network: bool = False,
     ) -> list[str]:
         """`delegate`'s arguments; `timeout` is in minutes, as `--timeout` takes it."""
         return [
@@ -190,6 +192,7 @@ class WrapperTestCase(unittest.TestCase):
             "--write-scope", *(write_scope or ["none"]),
             *(arg for check in checks or [] for arg in ("--check", check)),
             *(["--timeout", timeout] if timeout is not None else []),
+            *(["--network"] if network else []),
         ]
 
     def write_task(self, text: str) -> Path:
@@ -212,6 +215,12 @@ class WrapperTestCase(unittest.TestCase):
         self.assertEqual(len(calls), 1, "expected exactly one Codex invocation")
         return calls[0]
 
+    def evidence(self, completed: subprocess.CompletedProcess[str]) -> dict[str, Any]:
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        result_path = Path(stdout_field(completed.stdout, "Result"))
+        evidence: dict[str, Any] = json.loads((result_path.parent / "evidence.json").read_text())
+        return evidence
+
 
 # src/greet.py before and after the writing scenarios, and the file they add.
 GREET = 'def greet(name):\n    return f"Hello, {name}"\n'
@@ -229,12 +238,6 @@ class WritingDelegationTestCase(WrapperTestCase):
         (self.repo / "src" / "old.py").write_text("UNUSED = True\n")
         git(self.repo, "add", "src")
         git(self.repo, "commit", "--quiet", "--message", "Add src")
-
-    def evidence(self, completed: subprocess.CompletedProcess[str]) -> dict[str, Any]:
-        self.assertEqual(completed.returncode, 0, completed.stderr)
-        result_path = Path(stdout_field(completed.stdout, "Result"))
-        evidence: dict[str, Any] = json.loads((result_path.parent / "evidence.json").read_text())
-        return evidence
 
     def files(self) -> dict[str, str]:
         """The main working tree's files, Git's own aside."""

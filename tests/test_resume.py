@@ -122,11 +122,11 @@ class ResumeRefusalTest(ResumeTestCase):
 
         self.assert_refused(self.resume(run_id, "d1"), "no Codex session")
 
-    def test_refuses_a_model_effort_or_write_scope_of_its_own(self) -> None:
+    def test_refuses_a_model_effort_write_scope_or_network_grant_of_its_own(self) -> None:
         run_id, _ = self.start_run()
         self.delegate(run_id)
 
-        for extra in (["--model", "gpt-6-luna"], ["--effort", "high"], ["--write-scope", "src/"]):
+        for extra in (["--model", "gpt-6-luna"], ["--effort", "high"], ["--write-scope", "src/"], ["--network"]):
             with self.subTest(extra=extra):
                 self.assert_refused(self.resume(run_id, "d1", *extra), "keeps")
 
@@ -206,3 +206,31 @@ class ResumeWritingTest(ResumeTestCase, WritingDelegationTestCase):
         self.assertIn(first["worktree"], completed.stderr)
         self.assertEqual(self.codex_calls("exec resume"), [])
         self.assertFalse((record / "delegations" / "d2").exists())
+
+
+class ResumeNetworkGrantTest(ResumeTestCase, WritingDelegationTestCase):
+    def test_a_resumed_writing_delegation_keeps_the_grant(self) -> None:
+        for network in (True, False):
+            with self.subTest(network=network):
+                run_id, _ = self.start_run()
+                first = stdout_field(
+                    self.delegate(run_id, write_scope=["src/"], scenario="write-done", network=network).stdout,
+                    "Delegation",
+                )
+
+                _, evidence = self.record_of(self.resume(run_id, first, scenario="write-followup"))
+
+                self.assertIs(evidence["network"], network)
+                call = self.codex_calls("exec resume")[-1]
+                self.assertIs(call.config["sandbox_workspace_write.network_access"], network)
+
+    def test_a_resumed_read_only_delegation_keeps_the_grant(self) -> None:
+        run_id, _ = self.start_run()
+        self.delegate(run_id, network=True)
+
+        _, evidence = self.record_of(self.resume(run_id, "d1"))
+
+        self.assertIs(evidence["network"], True)
+        call = self.only_resume_call()
+        self.assertIsNone(call.option("--sandbox"))
+        self.assertEqual(call.config["default_permissions"], "read_only_network")

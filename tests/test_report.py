@@ -17,7 +17,7 @@ BLOCKED_TOKENS = ("9894 input", "0 cached", "68 output", "0 reasoning")
 
 class ReportTestCase(WrapperTestCase):
     def delegate(
-        self, run_id: str, model: str, effort: str, scenario: str = "read-only-done"
+        self, run_id: str, model: str, effort: str, scenario: str = "read-only-done", network: bool = False
     ) -> subprocess.CompletedProcess[str]:
         return self.run_wrapper(
             "delegate",
@@ -26,12 +26,15 @@ class ReportTestCase(WrapperTestCase):
             "--model", model,
             "--effort", effort,
             "--write-scope", "none",
+            *(["--network"] if network else []),
             scenario=scenario,
         )
 
-    def delegation(self, run_id: str, model: str, effort: str, scenario: str = "read-only-done") -> str:
+    def delegation(
+        self, run_id: str, model: str, effort: str, scenario: str = "read-only-done", network: bool = False
+    ) -> str:
         """Run a Delegation that returns a Result, and return its id."""
-        completed = self.delegate(run_id, model, effort, scenario)
+        completed = self.delegate(run_id, model, effort, scenario, network)
         self.assertEqual(completed.returncode, 0, completed.stderr)
         return stdout_field(completed.stdout, "Delegation")
 
@@ -99,6 +102,16 @@ class RunReportTest(ReportTestCase):
 
         self.assertIn("ASTRA", delegation_line(stdout, astra))
         self.assertNotIn("ASTRA", delegation_line(stdout, sol))
+
+    def test_marks_delegations_granted_network(self) -> None:
+        run_id, _ = self.start_run()
+        offline = self.delegation(run_id, "gpt-6.1-sol", "medium")
+        granted = self.delegation(run_id, "gpt-6.1-sol", "medium", network=True)
+
+        stdout = self.report_stdout(run_id)
+
+        self.assertIn("NETWORK", delegation_line(stdout, granted))
+        self.assertNotIn("NETWORK", delegation_line(stdout, offline))
 
     def test_totals_tokens_per_model(self) -> None:
         run_id, _ = self.start_run()

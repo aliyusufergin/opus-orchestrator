@@ -7,7 +7,7 @@ The five tasks are in [tasks.toml](tasks.toml). Each one names the repository it
 ## Configurations
 
 - `alone`: Opus alone, with the prompt as given and the plugin off.
-- `pointer`: Opus with the wrapper and the minimal pointer skill in [pointer-skill](pointer-skill/SKILL.md). The pointer stays here as a baseline once the plugin's own skill grows. Until then the two are the same, so measure only one of `pointer` and `skill`.
+- `pointer`: Opus with the wrapper and the minimal pointer skill in [pointer-skill](pointer-skill/SKILL.md). The pointer stays here as a baseline now that the plugin's own skill has grown past it, starting with the network grant (issue #24).
 - `skill`: Opus with the plugin's own skill.
 
 With the plugin, the prompt starts the skill, `/opus-orchestrator:orchestrate <prompt>`. The Run gets a copy of the plugin from this checkout, without this folder, so the task definitions and their answers stay out of its sight. An installed copy of the plugin is switched off for the run.
