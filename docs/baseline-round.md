@@ -17,14 +17,14 @@ Claude's cost is Claude Code's list-price `costUSD` from the run's `modelUsage`.
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | bug-fix | alone | yes | 39 s | 6 | 2,133 | 143K | $0.33 | — | — |
 | bug-fix | pointer | yes | 89 s | 4 | 3,922 | 331K | $0.46 | 1: gpt-6.1-sol low, `done`, 39 s | 71,457 in (54,272 cached), 771 out |
-| investigation | alone | ungraded¹ | 37 s | 5 | 2,961 | 134K | $0.35 | — | — |
-| investigation | pointer | ungraded¹ | 292 s | 3 | 4,819 | 329K | $0.51 | 1: gpt-6.1-sol medium, read-only, `done`, 247 s | 286,512 in (226,432 cached), 8,030 out |
+| investigation | alone | yes¹ | 37 s | 5 | 2,961 | 134K | $0.35 | — | — |
+| investigation | pointer | yes¹ | 292 s | 3 | 4,819 | 329K | $0.51 | 1: gpt-6.1-sol medium, read-only, `done`, 247 s | 286,512 in (226,432 cached), 8,030 out |
 | parallel-feature | alone | yes | 669 s | 58 | 47,931 | 5,593K | $3.21 | — | — |
 | parallel-feature | pointer | yes | 1,087 s | 9 | 12,108 | 971K | $1.02 | 1: gpt-6.1-sol xhigh, `partial`, 951 s | 3,518,417 in (3,373,696 cached), 28,390 out |
 
 The Codex columns come from each clone's Run record through the wrapper's `report`. The `codex` field of the `pointer` lines in results.jsonl reads 0 Delegations because the runner looks for evidence one level too shallow (issue #29).
 
-¹ Known-answer task; the runner had no terminal to ask on, so `passed` is null for you to grade. In my reading both final messages give the known answer: 404 detection by a manifest HEAD, a new version skipped with the locked entry kept, a vanished locked tag failing, no lock file failing, and the 3.x path skipping a missing patch without falling back. Neither says the HEAD request is anonymous. Only `alone` names a failed token request explicitly; `pointer` says only that any error other than a 404 fails the run. Neither run changed a file.
+¹ Known-answer task. The runner had no terminal to ask on and recorded both runs ungraded. The user left the grade to Claude, which marked both passed in results.jsonl. Both final messages give the known answer: 404 detection by a manifest HEAD, a new version skipped with the locked entry kept, a vanished locked tag failing, no lock file failing, and the 3.x path skipping a missing patch without falling back. Neither says the HEAD request is anonymous. Only `alone` names a failed token request explicitly; `pointer` says only that any error other than a 404 fails the run. That is an omission, not an error, so it still passes. Neither run changed a file.
 
 **In short:** every run passed, so delegation didn't change the outcome. On the two small tasks it made things worse: more Claude Quota (+41% and +46%) and two to eight times the wall time. On the large task it cut Claude Quota by about two-thirds (−68%, with 75% fewer output tokens) for 1.6 times the wall time and 3.5M Codex input tokens, nearly all cached.
 
@@ -82,5 +82,5 @@ Apart from these, the wrapper worked as designed in every run: Snapshots, worktr
 ## Limits
 
 - One run per configuration, at medium effort. Wall times include contention: the four n8n runs ran together on four CPUs, and `parallel-feature` `alone` started while `investigation` `pointer` was still running.
-- The `investigation` grades are pending the user's judgement.
+- The `investigation` grades are Claude's, at the user's request.
 - The `skill` configuration isn't part of this round. It is measured in the skill round, issue #13.
