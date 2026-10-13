@@ -42,6 +42,7 @@ POINTER_SKILL = TEST_CASES / "pointer-skill" / "SKILL.md"
 PLUGIN_NAME = "opus-orchestrator"
 SKILL_COMMAND = f"/{PLUGIN_NAME}:orchestrate"
 CONFIGS = ("alone", "pointer", "skill")
+EFFORTS = ("low", "medium", "high", "xhigh", "max")
 CLAUDE_USAGE_FIELDS = {
     "input": "inputTokens",
     "cache_creation": "cacheCreationInputTokens",
@@ -186,7 +187,7 @@ def plugin_copy(config: str) -> Iterator[Path | None]:
         shutil.rmtree(parent, ignore_errors=True)
 
 
-def claude_command(task: Task, model: str, plugin: Path | None) -> list[str]:
+def claude_command(task: Task, model: str, effort: str | None, plugin: Path | None) -> list[str]:
     prompt = task.prompt if plugin is None else f"{SKILL_COMMAND} {task.prompt}"
     # An installed copy of the plugin stays off, so only the configuration's copy is loaded.
     settings = {"enabledPlugins": {f"{PLUGIN_NAME}@{PLUGIN_NAME}": False}}
@@ -198,6 +199,8 @@ def claude_command(task: Task, model: str, plugin: Path | None) -> list[str]:
         "--permission-mode", "auto",
         "--settings", json.dumps(settings),
     ]
+    if effort is not None:
+        command += ["--effort", effort]
     if plugin is not None:
         command += ["--plugin-dir", str(plugin)]
     return command
@@ -246,9 +249,9 @@ def grade_answer(task: Task, final_message: str) -> bool | None:
             return reply == "y"
 
 
-def run_task(task: Task, config: str, model: str, results: Path, keep: bool) -> int:
+def run_task(task: Task, config: str, model: str, effort: str | None, results: Path, keep: bool) -> int:
     with throwaway_clone(task, task.start, keep=keep) as clone, plugin_copy(config) as plugin:
-        command = claude_command(task, model, plugin)
+        command = claude_command(task, model, effort, plugin)
         print(f"Running {task.id} ({config}) in {clone}", flush=True)
         started = time.monotonic()
         try:
@@ -273,6 +276,7 @@ def run_task(task: Task, config: str, model: str, results: Path, keep: bool) -> 
             "task": task.id,
             "config": config,
             "model": model,
+            "effort": effort,
             "passed": passed,
             "check": check,
             "wall_seconds": wall_seconds,
@@ -312,6 +316,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
             command.add_argument("--task", required=True, dest="task_id", help="the task id")
             command.add_argument("--config", required=True, choices=CONFIGS, help="the configuration")
             command.add_argument("--model", default="opus", help="the Orchestrator's model (default: opus)")
+            command.add_argument(
+                "--effort", choices=EFFORTS,
+                help="the Orchestrator's effort, so that runs compare like with like (default: your setting)",
+            )
             command.add_argument("--keep", action="store_true", help="keep the clone and its Run records")
     return parser.parse_args(argv)
 
@@ -326,7 +334,9 @@ def main(argv: list[str]) -> int:
                 print(f"{task.id:<18} {task.title} ({kind})")
             return 0
         if args.command == "run":
-            return run_task(find_task(tasks, args.task_id), args.config, args.model, args.results, args.keep)
+            return run_task(
+                find_task(tasks, args.task_id), args.config, args.model, args.effort, args.results, args.keep
+            )
         selected = [find_task(tasks, task_id) for task_id in args.task_ids] if args.task_ids else tasks
         failed = False
         for task in selected:
