@@ -55,7 +55,7 @@ def main() -> int:
 
     git_dir = Path(git("rev-parse", "--path-format=absolute", "--git-common-dir"))
     for number, usage in enumerate(json.loads(os.environ.get("FAKE_CLAUDE_USAGE", "[]")), start=1):
-        delegation = git_dir / "opus-orchestrator" / "runs" / "run-1" / f"d{number}"
+        delegation = git_dir / "opus-orchestrator" / "runs" / "run-1" / "delegations" / f"d{number}"
         delegation.mkdir(parents=True)
         evidence = {"model": "gpt-6.1-sol", "effort": "medium", "usage": usage}
         (delegation / "evidence.json").write_text(json.dumps(evidence))

@@ -22,7 +22,7 @@ Claude's cost is Claude Code's list-price `costUSD` from the run's `modelUsage`.
 | parallel-feature | alone | yes | 669 s | 58 | 47,931 | 5,593K | $3.21 | — | — |
 | parallel-feature | pointer | yes | 1,087 s | 9 | 12,108 | 971K | $1.02 | 1: gpt-6.1-sol xhigh, `partial`, 951 s | 3,518,417 in (3,373,696 cached), 28,390 out |
 
-The Codex columns come from each clone's Run record through the wrapper's `report`. The `codex` field of the `pointer` lines in results.jsonl reads 0 Delegations because the runner looks for evidence one level too shallow (issue #29).
+The Codex columns come from each clone's Run record through the wrapper's `report`. The runner first recorded 0 Delegations for the `pointer` lines because it looked for evidence one level too shallow (issue #29). Their `codex` field has since been recounted from the kept Run records.
 
 ¹ Known-answer task. The runner had no terminal to ask on and recorded both runs ungraded. The user left the grade to Claude, which marked both passed in results.jsonl. Both final messages give the known answer: 404 detection by a manifest HEAD, a new version skipped with the locked entry kept, a vanished locked tag failing, no lock file failing, and the 3.x path skipping a missing patch without falling back. Neither says the HEAD request is anonymous. Only `alone` names a failed token request explicitly; `pointer` says only that any error other than a 404 fails the run. That is an omission, not an error, so it still passes. Neither run changed a file.
 
@@ -74,7 +74,7 @@ GPT-6 Luna was never used, and none of the tasks had mechanical bulk work for it
 
 ## Wrapper and runner failures filed
 
-- Issue #29: the test-case runner misses Codex's tokens: it globs `runs/*/*/evidence.json`, but evidence lives in `runs/<Run id>/delegations/<id>/`, and the fake Claude repeats the same wrong layout.
+- Issue #29 (fixed): the test-case runner missed Codex's tokens: it globbed `runs/*/*/evidence.json`, but evidence lives in `runs/<Run id>/delegations/<id>/`, and the fake Claude repeated the same wrong layout.
 - Issue #30: without a network grant, a Delegate can't run Gradle or anything else that needs a loopback socket.
 
 Apart from these, the wrapper worked as designed in every run: Snapshots, worktrees, Check reruns, `apply` and `report`. Issue #30 is the sandbox behaving as configured, filed because its consequence for Checks wasn't expected and needs a decision.

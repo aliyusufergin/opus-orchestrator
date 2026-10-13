@@ -217,7 +217,7 @@ def codex_usage(clone: Path) -> dict[str, Any]:
     tokens: dict[str, int] | None = None
     models: dict[str, int] = {}
     delegations = 0
-    for evidence_path in sorted((git_dir / PLUGIN_NAME / "runs").glob("*/*/evidence.json")):
+    for evidence_path in sorted((git_dir / PLUGIN_NAME / "runs").glob("*/delegations/*/evidence.json")):
         try:
             evidence = json.loads(evidence_path.read_text())
         except (OSError, ValueError):
