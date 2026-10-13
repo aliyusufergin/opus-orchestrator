@@ -37,7 +37,7 @@ No fallback was recorded. The directions offered were:
 - run Codex in a cgroup or a systemd scope that can be killed whole;
 - accept the leftover and have the evidence name it.
 
-**Decided on 2026-10-09:** the wrapper tracks every process Codex starts and ends them all, as a child subreaper, without new dependencies. Issue #23.
+**Decided on 2026-10-09:** the wrapper tracks every process Codex starts and ends them all, as a child subreaper, without new dependencies. Issue #23. **Checked on 2026-10-13:** see below.
 
 ### The wrapper has no network grant
 
@@ -51,3 +51,17 @@ Issue #1 lists "an optional network grant" among `delegate`'s inputs, and ADR 00
 - **A resumed turn numbers its items from `item_0` again.**
 - **A Check can leave build output in the worktree**, such as `src/__pycache__/` from a Python Check. Here the Delegate removed it itself. The wrapper takes the diff before it reruns the Checks, so build output from the reruns stays out of the diff.
 - **The live catalog was unchanged** from the recording of 2026-10-06.
+
+## 2026-10-13: ending every process a Delegation starts
+
+Rechecks item 9 after issue #23 made the wrapper a child subreaper while Codex or a Check runs.
+
+- **Codex CLI:** 0.159.2, signed in with ChatGPT Plus; Linux
+- **Where:** a throwaway repository with `src/greet.py`
+- **Run:** two writing Delegations on `gpt-6-luna` at effort `low`, each told to run `sleep 300` in the foreground, with a 1-minute timeout: d1 through the changed wrapper, d2 through the wrapper of `main` before the change
+- **Token usage:** not reported: both Delegations timed out before `turn.completed`
+- **Evidence:** the process list, taken while d1 ran and after each Delegation returned, from the terminal output of the check
+
+| # | Assumption | Observed | Holds |
+| --- | --- | --- | --- |
+| 9 | A timed-out Delegate's sandboxed command is gone once `delegate` returns | While d1 ran, the command ran as `codex exec` → `codex-linux-sandbox` → `bwrap --as-pid-1 --new-session --die-with-parent` → `codex-linux-sandbox` → `sleep 300`, the last two in a session of their own. The wrapper stopped Codex at 60.1 s, wrote a `partial` Result with `failure_kind: timeout`, and removed the worktree. One second after `delegate` returned, none of these processes was running. d2, through the wrapper before the change, also ended in `partial` at 60.0 s, but its inner `codex-linux-sandbox` and `sleep 300` ran on, reparented to init, until ended by hand. | yes |
