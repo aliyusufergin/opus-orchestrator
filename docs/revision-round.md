@@ -4,7 +4,7 @@ Test cases 1, 3 and 5 (`bug-fix`, `investigation`, `parallel-feature`) in the `s
 
 The verdict follows the same rule as the skill round: at least as many tasks passed as both baselines, and less Claude Quota than Opus alone.
 
-**Verdict: the round passes.** The second revision (commit `61f6ada`) passed all three tasks, as both baselines did, and used 45% fewer Claude tokens and 34% lower Claude cost than Opus alone. A first attempt with the first revision is recorded below; its `parallel-feature` run ran out of ChatGPT Quota and isn't counted, but it showed that the first revision hadn't closed gap 1. The round's wall time is the weak spot: `parallel-feature` took 1,740 s, ten minutes of it lost to a failure that is now a Gotcha.
+**Verdict: the round passes.** The second revision (commit `61f6ada`; the Gotcha this round added and two wording fixes from review came after the runs) passed all three tasks, as both baselines did, and used 45% fewer Claude tokens and 34% lower Claude cost than Opus alone. A first attempt with the first revision is recorded below; its `parallel-feature` run ran out of ChatGPT Quota and isn't counted, but it showed that the first revision hadn't closed gap 1. The round's wall time is the weak spot: `parallel-feature` took 1,740 s, ten minutes of it lost to a failure that is now a Gotcha.
 
 ## Setup
 
@@ -56,7 +56,7 @@ Against the skill round's gaps, in the counted runs:
 - **Gap 1, production code written after a short read: closed.** Before the Delegations, Opus wrote one signature with a stub body and nothing else, and the core behaviour went to a Delegation together with its tests. But see the limits: the skill's own account of the failure names the case.
 - **Gap 2, tests of the Orchestrator's account: closed.** The tests came from the Delegate that wrote the behaviour, against criteria the task part gave "verbatim where possible".
 - **Gap 3, a small investigation delegated: closed,** in both attempts. Opus answered from one 370-line file in 35–37 s, as `alone` did.
-- **Gap 4, a split that didn't shorten the Run: not closed.** Opus's own share was short this time, two minutes before the Delegations and four after, but the longest Delegation, core at xhigh, took 747 s. Without the ten lost minutes, the Run would have taken about 1,120 s, about as long as `pointer`'s 1,087 s and still longer than `alone`'s 669 s. The guidance stays: it is still true and cheap. Shortening the Run needs a smaller longest part, which this split didn't find.
+- **Gap 4, a split that didn't shorten the Run: not closed.** Opus's own share was short this time, two minutes before the Delegations and four after, but the longest Delegation, core at xhigh, took 747 s. Without the 620 s between starting the first Delegations and starting them again, the Run would have taken about 1,120 s, about as long as `pointer`'s 1,087 s and still longer than `alone`'s 669 s. The guidance stays: it is still true and cheap. Shortening the Run needs a smaller longest part, which this split didn't find.
 - **Gap 5, the skill's own cost without a Delegation: smaller, within run-to-run noise.** Neither n8n run called `report`. `bug-fix` took 4 turns and cost 7% more than `alone` (29% in the skill round). The first attempt's `bug-fix`, with the same guidance, took 9 turns and cost 31% more, so one run per task can't separate the revision from variation. On both n8n tasks the skill used fewer Claude tokens than `alone`, yet cost more, because its cache writes, which cost more per token, were larger.
 
 ## The background time limit (a new failure)
@@ -78,10 +78,10 @@ The first revision (commit `260fb88`) ran all three tasks. Its `parallel-feature
 | Task | Passed | Wall time | Claude turns | Claude tokens | Claude cost | Delegations |
 | --- | --- | --- | --- | --- | --- | --- |
 | bug-fix | yes | 114 s | 9 | 298K | $0.43 | none |
-| investigation | yes¹ | 37 s | 6 | 186K | $0.37 | none |
+| investigation | yes³ | 37 s | 6 | 186K | $0.37 | none |
 | parallel-feature | no (not counted) | 258 s | 2 | 793K | $0.83 | 2, both `quota_exhausted` |
 
-¹ Graded by Claude, as in the earlier rounds: the final message makes every point of the known answer except that the HEAD request is anonymous, like every earlier answer.
+³ Graded by Claude, as in the earlier rounds: the final message makes every point of the known answer except that the HEAD request is anonymous, like every earlier answer.
 
 What it showed:
 
