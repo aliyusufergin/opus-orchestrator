@@ -32,13 +32,16 @@ from typing import Any, Iterator
 
 TEST_CASES = Path(__file__).resolve().parent
 PLUGIN_ROOT = TEST_CASES.parent
+# The Run record's layout is the wrapper's, so the runner reads it through the wrapper's own code.
+sys.path.insert(0, str(PLUGIN_ROOT / "scripts"))
+import orchestrator  # noqa: E402
+
 TASKS = TEST_CASES / "tasks.toml"
 RESULTS = TEST_CASES / "results.jsonl"
 POINTER_SKILL = TEST_CASES / "pointer-skill" / "SKILL.md"
 PLUGIN_NAME = "opus-orchestrator"
 SKILL_COMMAND = f"/{PLUGIN_NAME}:orchestrate"
 CONFIGS = ("alone", "pointer", "skill")
-CODEX_USAGE_FIELDS = ("input_tokens", "cached_input_tokens", "output_tokens", "reasoning_output_tokens")
 CLAUDE_USAGE_FIELDS = {
     "input": "inputTokens",
     "cache_creation": "cacheCreationInputTokens",
@@ -213,23 +216,21 @@ def claude_tokens(output: dict[str, Any]) -> dict[str, int] | None:
 
 def codex_usage(clone: Path) -> dict[str, Any]:
     """Codex's tokens over every Delegation in the clone's Run records."""
-    git_dir = Path(git(clone, "rev-parse", "--path-format=absolute", "--git-common-dir").decode().strip())
+    runs = orchestrator.runs_dir(clone)
+    run_dirs = sorted(runs.iterdir()) if runs.is_dir() else []
     tokens: dict[str, int] | None = None
     models: dict[str, int] = {}
     delegations = 0
-    for evidence_path in sorted((git_dir / PLUGIN_NAME / "runs").glob("*/*/evidence.json")):
-        try:
-            evidence = json.loads(evidence_path.read_text())
-        except (OSError, ValueError):
+    for delegation_dir in (d for run_dir in run_dirs for d in orchestrator.delegations_in_order(run_dir)):
+        evidence = orchestrator.read_json_object(delegation_dir / "evidence.json")
+        if evidence is None:
             continue
         delegations += 1
         model = str(evidence.get("model"))
         models[model] = models.get(model, 0) + 1
         usage = evidence.get("usage")
         if isinstance(usage, dict):
-            tokens = tokens or dict.fromkeys(CODEX_USAGE_FIELDS, 0)
-            for key in CODEX_USAGE_FIELDS:
-                tokens[key] += int(usage.get(key) or 0)
+            tokens = orchestrator.add_usage(tokens, usage)
     return {"delegations": delegations, "models": models, "tokens": tokens}
 
 
