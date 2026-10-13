@@ -59,6 +59,8 @@ STOP_POLL_SECONDS = 0.05
 PR_SET_CHILD_SUBREAPER = 36
 # `ultra` is xhigh plus automatic subagent delegation, which Delegates never get (ADR 0001).
 REFUSED_EFFORTS = {"ultra"}
+# The Codex permissions profile the wrapper defines for a read-only Delegation granted network.
+READ_ONLY_NETWORK_PROFILE = "read_only_network"
 
 # Run records live in the repository's Git directory, so they are never tracked.
 RECORD_DIR = "opus-orchestrator"
@@ -434,17 +436,26 @@ def collect_changes(
     }
 
 
-def sandbox_options(write_scope: list[str] | None) -> list[str]:
+def sandbox_options(write_scope: list[str] | None, network: bool) -> list[str]:
+    """The sandbox for the Delegate's commands, with network only when the Contract grants it."""
     if write_scope is None:
-        # The read-only sandbox also gives commands no network.
-        return ["--sandbox", "read-only"]
+        if not network:
+            # The read-only sandbox also gives commands no network.
+            return ["--sandbox", "read-only"]
+        # The read-only sandbox has no network setting, so a permissions profile takes its place:
+        # Codex's own read-only profile plus network. Codex takes it instead of --sandbox.
+        return [
+            "-c", f'default_permissions="{READ_ONLY_NETWORK_PROFILE}"',
+            "-c", f'permissions.{READ_ONLY_NETWORK_PROFILE}.extends=":read-only"',
+            "-c", f"permissions.{READ_ONLY_NETWORK_PROFILE}.network.enabled=true",
+        ]
     return [
         "--sandbox", "workspace-write",
         # Writable only in the worktree (`--cd`): not /tmp or $TMPDIR, which workspace-write
-        # adds by default, and no network.
+        # adds by default.
         "-c", "sandbox_workspace_write.exclude_slash_tmp=true",
         "-c", "sandbox_workspace_write.exclude_tmpdir_env_var=true",
-        "-c", "sandbox_workspace_write.network_access=false",
+        "-c", f"sandbox_workspace_write.network_access={json.dumps(network)}",
     ]
 
 
@@ -465,8 +476,8 @@ def codex_command(
         "--ignore-user-config",
         "--disable", "apps",
         "-c", "agents.enabled=false",
-        # Network off: none for commands (see sandbox_options), and hosted web search is off.
-        *sandbox_options(write_scope),
+        # Network for commands only with a grant (see sandbox_options); hosted web search is always off.
+        *sandbox_options(write_scope, args.network),
         "-c", 'web_search="disabled"',
         "--json",
         "--output-schema", str(RESULT_SCHEMA),
@@ -491,12 +502,17 @@ def resumed_delegation(run_dir: Path, args: argparse.Namespace) -> dict[str, Any
     """The evidence of the earlier Delegation that `--resume` names."""
     given = [
         option
-        for option, value in (("--model", args.model), ("--effort", args.effort), ("--write-scope", args.write_scope))
+        for option, value in (
+            ("--model", args.model),
+            ("--effort", args.effort),
+            ("--write-scope", args.write_scope),
+            ("--network", True if args.network else None),  # A flag: None when not given.
+        )
         if value is not None
     ]
     if given:
         raise WrapperError(
-            f"a resumed Delegation keeps the model, effort and Write scope of {args.resume}; "
+            f"a resumed Delegation keeps the model, effort, Write scope and network grant of {args.resume}; "
             f"drop {', '.join(given)}",
             EXIT_USAGE,
         )
@@ -530,6 +546,8 @@ def delegate(args: argparse.Namespace) -> int:
     resumed = resumed_delegation(run_dir, args) if args.resume else None
     if resumed is not None:
         args.model, args.effort = resumed["model"], resumed["effort"]
+        # Evidence from before the grant existed has no `network`: those Delegations had none.
+        args.network = resumed.get("network") is True
         scope = resumed["write_scope"]
         write_scope = None if scope == "none" else parse_write_scope(scope)
     elif None in (args.model, args.effort, args.write_scope):
@@ -604,6 +622,7 @@ def delegate(args: argparse.Namespace) -> int:
         "model": args.model,
         "effort": args.effort,
         "write_scope": "none" if write_scope is None else write_scope,
+        "network": args.network,
         "timeout_minutes": timeout_minutes,
         "queued_at": queued_at,
         "wait_seconds": round(codex.wait_seconds, 3),
@@ -1032,6 +1051,7 @@ def print_summary(result_path: Path, result: dict[str, Any], evidence: dict[str,
         print(f"Resumes: {evidence['resumes']}")
     print(f"Status: {result.get('status')}")
     print(f"Model: {evidence['model']}, effort {evidence['effort']}")
+    print(f"Network: {'granted' if evidence['network'] else 'off'}")
     if evidence["failure_kind"]:
         print(f"Failure: {evidence['failure_kind']}: {evidence['failure']}")
     print(f"Duration: {evidence['duration_seconds']:.1f} s")
@@ -1047,6 +1067,11 @@ def print_summary(result_path: Path, result: dict[str, Any], evidence: dict[str,
 def astra_mark(model: str) -> str:
     # Astra needs the user's permission, so every Astra Delegation stands out (ADR 0003).
     return "  ASTRA" if "astra" in model.lower() else ""
+
+
+def network_mark(evidence: dict[str, Any]) -> str:
+    # A Delegate with network can reach beyond the machine, so the grant stands out.
+    return "  NETWORK" if evidence.get("network") is True else ""
 
 
 def format_seconds(seconds: Any) -> str:
@@ -1075,7 +1100,7 @@ def report(args: argparse.Namespace) -> int:
         usage = evidence.get("usage")
         print(
             f"{delegation_dir.name}  {model}{astra_mark(model)}  "
-            f"effort {evidence.get('effort')}  {status}  "
+            f"effort {evidence.get('effort')}{network_mark(evidence)}  {status}  "
             f"tokens {format_tokens(usage)}  "
             f"waited {format_seconds(evidence.get('wait_seconds'))}, "
             f"ran {format_seconds(evidence.get('duration_seconds'))}"
@@ -1141,7 +1166,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         metavar="DELEGATION",
         help=(
             "an earlier Delegation of the Run whose Codex session the task part continues; "
-            "it keeps that Delegation's model, effort and Write scope"
+            "it keeps that Delegation's model, effort, Write scope and network grant"
         ),
     )
     delegate_command.add_argument("--model", help="Codex model, such as gpt-6.1-sol")
@@ -1151,6 +1176,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         nargs="+",
         metavar="PATH",
         help="repository-relative paths the Delegate may change, or `none` for a read-only Delegation",
+    )
+    delegate_command.add_argument(
+        "--network",
+        action="store_true",
+        help="grant the Delegate's commands network access, which they otherwise lack; say so in the task part",
     )
     delegate_command.add_argument(
         "--check",
