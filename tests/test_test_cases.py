@@ -206,6 +206,21 @@ class RunTest(TestCaseRunnerTest):
         settings = json.loads(argv[argv.index("--settings") + 1])
         self.assertIs(settings["enabledPlugins"]["opus-orchestrator@opus-orchestrator"], False)
 
+    def test_an_effort_is_passed_to_claude_and_recorded(self) -> None:
+        self.run_task("alone", "--effort", "medium")
+
+        argv = self.claude_call()["argv"]
+        self.assertEqual(argv[argv.index("--effort") + 1], "medium")
+        [entry] = self.results_log()
+        self.assertEqual(entry["effort"], "medium")
+
+    def test_without_an_effort_claude_keeps_the_users_setting(self) -> None:
+        self.run_task("alone")
+
+        self.assertNotIn("--effort", self.claude_call()["argv"])
+        [entry] = self.results_log()
+        self.assertIsNone(entry["effort"])
+
     def test_the_pointer_configuration_starts_the_skill_with_the_minimal_pointer(self) -> None:
         self.run_task("pointer")
 
