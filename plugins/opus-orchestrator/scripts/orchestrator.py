@@ -105,6 +105,14 @@ class WrapperError(Exception):
         self.exit_code = exit_code
 
 
+class Stopped(WrapperError):
+    """A SIGTERM or SIGHUP from outside, such as Claude Code ending a background command."""
+
+    def __init__(self, signum: int) -> None:
+        self.signal_name = signal.Signals(signum).name
+        super().__init__(f"stopped by {self.signal_name}", 128 + signum)
+
+
 def git_bytes(cwd: Path, *args: str, env: dict[str, str] | None = None) -> bytes:
     completed = subprocess.run(["git", *args], cwd=cwd, env=env, capture_output=True)
     if completed.returncode != 0:
@@ -604,13 +612,20 @@ def delegate(args: argparse.Namespace) -> int:
                 "worktree": str(worktree),
                 **collect_changes(worktree, snapshot, write_scope, delegation_dir),
             }
-            check_reruns = rerun_checks(args.check, worktree, delegation_dir, timeout)
+            # Stopped, the wrapper may have little time left: the diff is what it keeps.
+            check_reruns = (
+                None if codex.stopped else rerun_checks(args.check, worktree, delegation_dir, timeout)
+            )
     duration = time.monotonic() - codex.started
 
     thread_id, usage, errors = read_events(events_path)
     result, result_problem = read_result(last_message)
     failure_kind, failure_message = None, None
-    failure = classify_failure(codex.exit_code, timeout_minutes, errors, result_problem)
+    failure = (
+        ("stopped", f"the wrapper was {codex.stopped} while Codex ran, so Checks weren't rerun")
+        if codex.stopped
+        else classify_failure(codex.exit_code, timeout_minutes, errors, result_problem)
+    )
     if failure is not None or result is None:
         failure_kind, failure_message = failure or ("invalid_result", str(result_problem))
         # The Delegate's own message stays in last-message.txt.
@@ -641,7 +656,7 @@ def delegate(args: argparse.Namespace) -> int:
     write_json(result_path, result)
     write_json(delegation_dir / "evidence.json", evidence)
     print_summary(result_path, result, evidence)
-    return 0
+    return codex.stopped.exit_code if codex.stopped else 0
 
 
 def read_result(path: Path) -> tuple[dict[str, Any] | None, str | None]:
@@ -767,8 +782,8 @@ def describe_checks(checks: list[dict[str, Any]]) -> str:
 def wrapper_result(failure_kind: str, failure: str, changed_paths: list[str] | None) -> dict[str, Any]:
     """The Result the wrapper writes when the Delegate's own can't stand: never `done`."""
     return {
-        # A timeout keeps what the Delegate did; anything else hands the decision back.
-        "status": "partial" if failure_kind == "timeout" else "blocked",
+        # A timeout or a stop keeps what the Delegate did; anything else hands the decision back.
+        "status": "partial" if failure_kind in ("timeout", "stopped") else "blocked",
         "summary": f"Written by the wrapper, not the Delegate: {failure}. See the evidence.",
         "changed_files": changed_paths,
         "checks": None,
@@ -827,6 +842,7 @@ class CodexRun(NamedTuple):
     wait_seconds: float  # Spent waiting for a Delegation slot.
     started_at: str
     started: float  # time.monotonic() when Codex started.
+    stopped: Stopped | None  # The stop that ended Codex, when the wrapper was stopped meanwhile.
 
 
 def run_codex(
@@ -842,15 +858,21 @@ def run_codex(
         open(events_path.parent / "codex-stderr.log", "wb") as stderr,
     ):
         started_at, started = now(), time.monotonic()
+        stopped = None
         try:
             exit_code = run_process_group(
                 command, timeout, cwd=workdir, input=contract.encode(), stdout=events, stderr=stderr
             )
+        except Stopped as stop:
+            # Codex is ended. The Delegation is still recorded, with what it changed so far, and a
+            # further stop waits until the wrapper exits rather than cutting the record short.
+            signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM, signal.SIGHUP})
+            exit_code, stopped = None, stop
         except OSError as error:
             raise WrapperError(
                 f"cannot run Codex ({command[0]}): {error.strerror}; set {CODEX_ENV} to its path"
             ) from None
-    return CodexRun(exit_code, wait_seconds, started_at, started)
+    return CodexRun(exit_code, wait_seconds, started_at, started, stopped)
 
 
 def run_process_group(
@@ -1217,7 +1239,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 def stop_on_signal(signum: int, _: Any) -> None:
     # Raised so that cleanup runs: Codex is killed and a worktree removed.
-    raise WrapperError(f"stopped by {signal.Signals(signum).name}", 128 + signum)
+    raise Stopped(signum)
 
 
 def main(argv: list[str]) -> int:
