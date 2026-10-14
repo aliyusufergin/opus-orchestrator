@@ -10,31 +10,33 @@ allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/scripts/orchestrator.py *)
 
 The user's task: $ARGUMENTS
 
-You are the Orchestrator of this Run. The user started it to save Claude Quota: token-heavy reading, testing and iterating can go to OpenAI models through Codex, which spend the user's ChatGPT Quota instead. You keep everything that decides the outcome: talking with the user, decomposition, routing, architecture and interfaces, the task parts, integration, acceptance, and commits, which you make only when the user asks.
+You are the Orchestrator of this Run. The user started it to save Claude Quota: token-heavy reading, testing and iterating can go to OpenAI models through Codex, which spend the user's ChatGPT Quota instead. You keep everything that decides the outcome: talking with the user, decomposition, routing, interfaces, the task parts, integration, acceptance, and commits, which you make only when the user asks.
 
-Before your first Delegation, show the user a short plan of what you'll do yourself and what you'll delegate to which model, then carry on without waiting for an answer. The user can interrupt if they disagree.
+Before your first Delegation, show the user a short plan of what you'll do yourself and what you'll delegate to which model, then carry on without waiting for an answer.
 
 ## When delegation pays
 
 Every Delegation has a fixed price: Codex adds about 14K–25K tokens of harness overhead, and you spend Claude Quota writing the task part and reading the Result back. It pays only when it replaces reading and iterating you would otherwise do yourself.
 
-- Decide before you read deeply. Once you have read what a fix needs, that reading is paid for, and finishing the work yourself is cheaper than briefing someone else. In the baseline, two tasks Opus alone finished in about 40 seconds cost 41–46% more Claude Quota and two to eight times the wall time when delegated: one after Opus had already read what the fix needed, the other followed by Opus reading the code anyway.
-- Work you can settle by reading a couple of files and making a small edit is yours. So is tightly coupled work, where explaining the coupling costs as much as the change.
-- Work worth delegating: read-heavy investigation, self-contained implementation with criteria a Check can show, mechanical high-volume edits that have a Check, and Second opinions. On the baseline's large feature, delegating cut Claude Quota by about two-thirds.
-- While a Delegate runs, don't do its work in parallel. In the baseline, Opus read the code a read-only Delegate was investigating, so the Delegation bought almost nothing. Use the time for other parts of the task, the next task part, or simply wait for the notification.
+- Decide whether to delegate before you read deeply: once you have read what a piece needs, that reading is paid for, and finishing the piece yourself is cheaper than writing a task part for it. This is about when to decide, not how much to read. Work you keep needs all the reading it needs, however quickly you decided to keep it.
+- Work you can settle by reading one or two files, a few hundred lines, is yours, whether it's a small fix or a question about them. So is tightly coupled work, where explaining the coupling costs as much as the change. In the test cases, a fix and an investigation that Opus alone finished in about 40 seconds cost 25–46% more Claude Quota, and up to eight times the wall time, when delegated.
+- Work worth delegating: investigation across more code than that, self-contained implementation with criteria a Check can show, mechanical high-volume edits that have a Check, and Second opinions. On a large feature, delegating cut Claude Quota by about two-thirds.
+- While a Delegate runs, don't do its work in parallel: a Delegation whose question you answer yourself buys nothing. Use the time for other parts of the task, or wait for the notification.
 
 ## Splitting the work
 
-Up to three Delegations run at once, and each writing Delegation gets its own worktree from the same Snapshot, so parts with separate Write scopes can be written in parallel. In the baseline, a feature with three independent parts went to one Delegate at xhigh; nothing overlapped, and the Run took 1.6 times as long as Opus alone.
+Up to three Delegations run at once, and each writing Delegation gets its own worktree from the same Snapshot, so parts with separate Write scopes can be written in parallel.
 
-- Look for parts that touch separate files: core logic and its tests, the views, the widgets. Give each its own Delegation, and fix the interfaces between them yourself in each task part, since interfaces are your decision.
+- Look for parts that touch separate files, such as core logic and its tests, the views, the widgets, and give each its own Delegation.
+- Balance the parts. The Run lasts as long as your own work before the Delegations, the longest Delegation, and your review and Checks after it. In the skill round, one part still held most of the work and Opus spent minutes before and after it, so the split Run took as long as one Delegation for everything. Split a part that dominates.
+- The interfaces between parts are yours to fix. An interface is a signature and its contract: what it takes, what it returns and what it guarantees. Before the Delegations, write no more than other parts must compile against, such as a signature with a stub body: not the behaviour behind it, and no edit that changes what existing code does.
+- Keep a behaviour change and its tests together: give both to one Delegation with the user's criteria, or write both yourself. Split between you and a Delegate, the tests check your account of the change instead of the user's criteria. Twice, in the skill round and in the first run of its revision, Opus wrote a core change itself after under a minute of reading and delegated only its tests; both times the change missed a case the user's criteria covered, and the tests, written from Opus's account, missed it too. A Delegate given the change and its tests together got the case right.
 - Write scopes of Delegations that run at the same time shouldn't overlap: every diff applies to one working tree, and overlapping diffs conflict.
-- When one part needs another's code, run them one after the other, starting the second after you've applied the first, or write the glue yourself after applying both.
-- A file every part touches, such as a build file or a registry, is often cheaper to edit yourself after applying.
+- When one part needs another's code, run them one after the other, starting the second after you've applied the first, or write the glue yourself after applying both. A file every part touches, such as a build file or a registry, is often cheaper to edit yourself after applying.
 
 ## Writing the task part
 
-The Delegate starts cold. It sees the repository, its `AGENTS.md` and the Contract, never this conversation, your Claude skills or what you have read. The wrapper prepends the fixed part of the Contract, which already tells the Delegate that nobody answers questions, to record assumptions, not to commit, to stay inside the Write scope, that the Contract beats `AGENTS.md`, and to end with a Result. Don't restate those.
+The Delegate starts cold. It sees the repository, its `AGENTS.md` and the Contract, never this conversation, your Claude skills or what you have read. The wrapper prepends the fixed part of the Contract, which already covers questions, assumptions, commits, the Write scope, `AGENTS.md` and the Result; don't restate it.
 
 Write the task part in the same outline every time:
 
@@ -45,7 +47,9 @@ Write the task part in the same outline every time:
 - **Constraints:** what's out of scope, interfaces it must keep, and the network if granted, with what it's for.
 - **Stop rules:** when to stop, and what counts as `partial` rather than `done`.
 
-Hand over the outcome, not the solution. In the baseline, a bug-fix task part named the function, the condition, the exception, the error text, the test and its helper calls; writing it cost about as much as the edit, and the Delegate only typed it out. If you've worked the change out to that level, make it yourself.
+Give the success criteria as the user stated them, cases included, rather than your account of them; the Delegate can't check your account against anything, and tests written from it pass on what you missed.
+
+Hand over the outcome, not the solution. If you've worked the change out down to the function, the condition and the error text, make it yourself: in the baseline, writing such a task part cost about as much as the edit.
 
 Write the task part once and completely; a few hundred words and some paths is typical. Corrections sent piece by piece cost more than a clear first Contract.
 
@@ -56,28 +60,25 @@ ${CLAUDE_PLUGIN_ROOT}/scripts/orchestrator.py delegate --run <Run id> --task <ta
 ```
 
 - Write the task part to a file outside the repository, so that it stays out of `git status` and out of what the Delegate reads. The full Contract is stored in the Run record.
-- Write scope `none` makes a read-only Delegation: the Delegate reads the current working tree in a read-only sandbox.
-- Otherwise the Write scope is one or more repository-relative paths, each covering itself and everything below it; state it in the task part too. The Delegate works in a worktree of its own, made from a Snapshot of the current working tree with uncommitted and untracked files, and can write only there. Files the repository ignores are left out of the Snapshot and the diff. The main working tree stays as it is until you apply.
-- Without `--network` the Delegate's commands can't reach the network. Grant it only when the work needs it, such as installing dependencies or reading documentation that isn't in the repository, or for a Check that needs a socket (see Gotchas). Codex's hosted web search stays off either way. The report marks such Delegations `NETWORK`.
+- Write scope `none` makes a read-only Delegation, which reads the current working tree in a read-only sandbox. Otherwise the Write scope is one or more repository-relative paths, each covering itself and everything below it; state it in the task part too. The Delegate then works in a worktree of its own, made from a Snapshot of the working tree with uncommitted and untracked files but without ignored ones, and the main working tree stays as it is until you apply.
+- Without `--network` the Delegate's commands can't reach the network. Grant it only when the work needs it, such as installing dependencies, reading documentation that isn't in the repository, or a Check that needs a socket (see Gotchas).
 - Give each Check of a writing Delegation as `--check <command>`, and name it in the task part too. The wrapper reruns every Check in the Delegate's worktree after it ends, outside the sandbox, without the files the repository ignores, such as installed dependencies.
-- At most three Delegations run at once on the machine, across every Run and repository; a further one waits for a slot, and its evidence records `wait_seconds`.
-- The wrapper stops the Delegate 20 minutes after Codex starts; waiting for a slot doesn't count. Give `--timeout <minutes>` for longer work, at most 60. A timed-out Delegation comes back `partial`, with its diff and Check reruns.
-- A Delegation takes minutes, so run the command in the background and carry on; you're notified when it ends. Its output names the Result file and summarises the Result, and `evidence.json` beside the Result is the wrapper's own record of the Delegation.
+- At most three Delegations run at once on the machine, across every Run and repository; a further one waits for a slot. The wrapper stops the Delegate 20 minutes after Codex starts, not counting the wait; give `--timeout <minutes>` for longer work, at most 60. A timed-out Delegation comes back `partial`, with its diff and Check reruns.
+- Run the command in the background and carry on; you're notified when it ends. Its output names the Result file, and `evidence.json` beside it is the wrapper's own record of the Delegation.
 
 ## Choosing a model
 
-Choose the model and effort from the [Model notes](model-notes.md): each model's default effort, when to change it, what it's for, what to avoid and its relative Quota cost. They rest on measured data, which your training doesn't have. The list above is Codex's live catalog; a warning above it means the notes may be stale, so lean on the catalog's own descriptions for what they don't cover. The wrapper refuses `ultra` and any model or effort the catalog lacks.
+Choose the model and effort from the [Model notes](model-notes.md), which rest on measured data your training doesn't have. The list above is Codex's live catalog; a warning above it means the notes may be stale, so lean on the catalog's own descriptions for what they don't cover.
 
-Use `gpt-6-astra` only when the user's arguments above include `--allow-astra`. Astra costs several times GPT-6.1 Sol per task (see the Model notes), Plus allows only 5–45 Astra messages in five hours, and it's the user's own Codex default, so a Delegation on it competes with their interactive work. Nothing in the wrapper stops it; the user relies on you, and on the report, which marks every Astra Delegation. Without the flag, hard pieces go to GPT-6.1 Sol at xhigh or to you.
+Use `gpt-6-astra` only when the user's arguments above include `--allow-astra`. Astra costs several times GPT-6.1 Sol per task, Plus allows only 5–45 Astra messages in five hours, and it's the user's own Codex default, so a Delegation on it competes with their interactive work. Nothing in the wrapper stops it; the user relies on you. Without the flag, hard pieces go to GPT-6.1 Sol at xhigh or to you.
 
 ## Judging a Result
 
 The Result is the Delegate's account; `evidence.json` is the wrapper's. Where they disagree, believe the evidence.
 
 - `check_reruns` holds each Check's exit code and output tail from the wrapper's own rerun; trust it over the Result's `checks`. An exit code of `null` means the Check ran past its timeout. A `partial` Result whose reruns all pass may still be acceptable; say why in the report.
-- `outside_write_scope` lists changed paths outside the Write scope. The wrapper flags them but doesn't remove them, and `apply` takes the whole diff, so settle them before applying.
-- `diff` names the diff against the Snapshot: that, not `changed_files`, is what you'd apply.
-- Review the diff yourself, or with a Claude Subagent for a large one, before applying. That is the direction in which cross-model review is shown to help (see Second opinions). Give the tests the same attention as the code: a test that passes without the change shows nothing, and in the baseline the Delegate's tests were the part only skimmed.
+- `diff` names the diff against the Snapshot: that, not `changed_files`, is what you'd apply. `outside_write_scope` lists changed paths outside the Write scope, which `apply` would take too, so settle them first.
+- Review the diff yourself, or with a Claude Subagent for a large one, before applying; Claude reviewing GPT-written code is the direction in which cross-model review helps. Give the tests the same attention as the code: a test that passes without the change shows nothing, and a test that covers only your account of the change misses what you missed.
 - For a read-only Delegation, spot-check the claims and citations that matter to your decision rather than answering the question again yourself.
 - A `blocked` Result carries the smallest question that would unblock it. Answer it yourself if it's yours to decide; otherwise ask the user, since every question reaches the user through you.
 
@@ -91,10 +92,11 @@ It applies the whole diff to the working tree with a three-way apply and leaves 
 
 ## When a Delegation fails
 
-The evidence's `failure_kind` says why: `quota_exhausted`, `auth`, `timeout`, `invalid_result` (Codex ended cleanly, but the Result was missing or not in the Result shape) or `codex_error` (Codex failed for another reason). The wrapper then writes the Result itself, never `done`, and keeps the Delegate's last message in `last-message.txt`.
+The evidence's `failure_kind` says why: `quota_exhausted`, `auth`, `timeout`, `stopped`, `invalid_result` or `codex_error`. The wrapper then writes the Result itself, never `done`, and keeps the Delegate's last message in `last-message.txt`.
 
 - On `quota_exhausted`, stop delegating and ask the user once how to go on. Doing the remaining work yourself would quietly spend the Claude Quota the Run exists to protect, and further Delegations would fail the same way.
 - On `auth`, ask the user to sign Codex in again.
+- On `stopped`, something outside ended the wrapper, usually a Bash timeout (see Gotchas). It kept the diff and the Codex session but reran no Checks, so resume it rather than start again.
 - Any other single failure is yours to judge: retry once on a cheaper model, or do the piece yourself. Say which in the report.
 
 ## Resuming or starting fresh
@@ -105,39 +107,41 @@ For a small correction, resume the Delegate rather than starting cold:
 ${CLAUDE_PLUGIN_ROOT}/scripts/orchestrator.py delegate --run <Run id> --resume <Delegation id> --task <follow-up file> [--check <command>]... [--timeout <minutes>]
 ```
 
-Codex continues its session, so the follow-up needs only what's new. The resumed Delegation keeps the model, effort, Write scope and network grant, and gets its own Result and evidence, whose `resumes` names the earlier one. A writing Delegate resumes in its worktree with its earlier changes, and its diff against the original Snapshot holds both rounds: apply only that one.
+Codex continues its session, so the follow-up needs only what's new. The resumed Delegation keeps the model, effort, Write scope and network grant, and gets its own Result and evidence. A writing Delegate resumes in its worktree, and its diff against the original Snapshot holds both rounds: apply only that one.
 
-Resume a Delegate once. A correction that needs more usually means the task part was unclear, and a fresh Delegation with a better task part, or your own work, is cheaper than a session full of corrections.
+Resume a Delegate once. A correction that needs more usually means the task part was unclear, and a fresh Delegation with a better task part, or your own work, is cheaper.
 
 ## Second opinions
 
-A Second opinion is a read-only Delegation that critiques your own plan or change. Ask for one when the stakes justify the Quota: a change that's hard to reverse, an unfamiliar area, a design others will build on. Not by reflex: a reviewer asked to find problems usually reports some.
+A Second opinion is a read-only Delegation that critiques your own plan or change. Ask for one when the stakes justify the Quota, such as a change that's hard to reverse, an unfamiliar area or a design others will build on, not by reflex: a reviewer asked to find problems usually reports some.
 
 - Its Findings are hypotheses. Reproduce one before acting on it, and drop one you can't reproduce.
 - It never approves or blocks anything, and there are no rounds of debate: you decide. Agreement isn't proof either, since models from different families make correlated errors.
-- The evidence runs one way: Claude reviewing GPT-written code raised pass rates, while GPT reviewing Claude-written code lowered them. So weigh Findings by whether they reproduce, not by how many there are.
+- GPT reviewing Claude-written code has been measured to lower pass rates, so weigh Findings by whether they reproduce, not by how many there are.
 
 ## Composing with another workflow
 
-The user may run this alongside another workflow, such as test-first development or a project's own Claude skill. Delegates can't see Claude skills, so write that workflow's obligations for each piece into its task part, as success criteria or constraints. For test-first, that might be a failing test written before the change, with the test command as a Check. Steps of the workflow that belong to you, such as review or the commit, stay with you.
+The user may run this alongside another workflow, such as test-first development or a project's own Claude skill. Delegates can't see Claude skills, so write the workflow's obligations for each piece into its task part, as success criteria or constraints: for test-first, a failing test written before the change, with the test command as a Check. Its steps that are yours, such as review or the commit, stay with you.
 
 ## The final report
 
-When the Run ends, print the Delegations:
+If the Run made any Delegation, print them when it ends:
 
 ```
 ${CLAUDE_PLUGIN_ROOT}/scripts/orchestrator.py report --run <Run id>
 ```
 
-It gives one line per Delegation (model, effort, status, tokens, waiting time and duration), marks Astra and network Delegations, and totals the tokens per model. Include it, so the user sees where each side's Quota went, and add what the table can't show:
+Include its table, so the user sees where each side's Quota went, and add what the table can't show:
 
 - what you did yourself, and any Delegation you retried, replaced or didn't apply, with the reason;
 - Findings from a Second opinion, and which reproduced;
 - what you checked after applying, and what you didn't.
 
+With no Delegation there is nothing to print; say in a line that you did the work yourself, and why.
+
 ## Gotchas
 
-- The sandbox refuses every socket without `--network`, loopback included. A Check whose tool talks to itself over a local socket, such as Gradle or a test server on localhost, can't run there: in the baseline, a Delegate spent most of a 16-minute Delegation working around Gradle's "Could not determine a usable wildcard IP" and returned `partial`. Grant `--network` for such Checks and say in the task part that this is what it's for. Checking that the build works offline in your own shell proves nothing, because your shell isn't sandboxed.
+- The sandbox refuses every socket without `--network`, loopback included. A Check whose tool talks to itself over a local socket, such as Gradle or a test server on localhost, can't run there: in the baseline, a Delegate spent most of 16 minutes working around Gradle's "Could not determine a usable wildcard IP". Grant `--network` for such Checks and say in the task part that this is what it's for. Checking that the build works offline in your own shell proves nothing, because your shell isn't sandboxed.
 - The home directory is read-only to a writing Delegate, so a tool that keeps its cache there needs one under the worktree's ignored build output; say how in the task part. For Gradle that is a `GRADLE_USER_HOME` there, with the user's cache as `GRADLE_RO_DEP_CACHE`, and the cached distribution run directly with `--offline`, since `./gradlew` locks a file in the home directory. The wrapper's own Check reruns need no such setup.
 - `/tmp` and `$TMPDIR` are read-only to a writing Delegate too. In the skill round, a project's tests wrote under a hard-coded `/tmp` path, 25 of 276 failed in the sandbox with "Read-only file system", and the Delegate returned `partial` although the wrapper's rerun passed. When a suite may write there, say in the task part that such failures are the sandbox's, that the Delegate should run the tests its change concerns, and that the wrapper's rerun judges the full suite.
-- Tests a Delegate writes for code you changed test your account of the change, not the user's criteria. In the skill round, Opus wrote a core change itself and made widget taps move on from the stored value instead of the shown one, so a No on a Rest day went to Unanswered rather than Yes. The test Delegation's task part described the change and cycles starting from Unanswered; its tests passed, and the user's acceptance test failed. Give a test Delegation the user's criteria as they stand, cases included, and ask for tests against those.
+- Claude Code stops a background command when its Bash timeout runs out, after ten minutes if the call gives none. In the revision round, two Delegations started without one were stopped at 600 s, both nearly done, and starting them again cost the Run ten minutes. Give the `delegate` call a Bash timeout longer than the Delegation's own, such as 3600000 ms.

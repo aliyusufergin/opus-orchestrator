@@ -2,7 +2,7 @@
 
 A Claude Code plugin in which a Claude Opus session, started by you for a task, hands bounded pieces of the work to OpenAI models through Codex and stays responsible for the outcome. The vocabulary is in [CONTEXT.md](CONTEXT.md) and the decisions are in [docs/adr](docs/adr).
 
-This is an early version. Its skill is written from the gaps the [baseline round](docs/baseline-round.md) measured, and [docs/orchestrate-skill.md](docs/orchestrate-skill.md) traces each piece of its guidance to its source. Its first measurement against the baselines, the [skill round](docs/skill-round.md), failed: the skill passed two of three test cases where both baselines passed all three, though it used less Claude Quota than Opus alone. The gaps it found are written up there for the skill's revision.
+This is an early version. Its skill is written from the gaps the [baseline round](docs/baseline-round.md) measured, and [docs/orchestrate-skill.md](docs/orchestrate-skill.md) traces each piece of its guidance to its source. Its first measurement against the baselines, the [skill round](docs/skill-round.md), failed: the skill passed two of three test cases where both baselines passed all three. The skill was revised from the gaps it found. In the [revision round](docs/revision-round.md), it passed all three test cases once, with 45% fewer Claude tokens than Opus alone, but only while its account of the earlier failure named the failing case. Worded generically, it passed one of three, so the revision doesn't reliably meet the baselines yet.
 
 ## Requirements
 
@@ -33,7 +33,7 @@ Only you can start a Run: Claude never invokes the skill on its own. `--allow-as
 
 Starting the skill creates a Run record in `.git/opus-orchestrator/runs/<Run id>/`, inside the repository's Git directory, so it is never tracked. Each Delegation leaves a folder there with its full Contract, Codex's JSONL events, the Result and the wrapper's evidence, and for a writing Delegation its diff and the output of each Check the wrapper reran.
 
-A writing Delegation runs in a Git worktree in the system's temporary directory, made from a Snapshot of your working tree: an unreferenced commit recorded through a temporary index, so your index, HEAD and branches stay as they are. The worktree is removed when the Delegation ends, also when it fails or the wrapper is stopped.
+A writing Delegation runs in a Git worktree in the system's temporary directory, made from a Snapshot of your working tree: an unreferenced commit recorded through a temporary index, so your index, HEAD and branches stay as they are. The worktree is removed when the Delegation ends, also when it fails or the wrapper is stopped. A wrapper stopped while Codex runs, by SIGTERM or SIGHUP, still records the Delegation, as `stopped`, with its diff, so it can be resumed.
 
 At most three Delegations run Codex at once on the machine, across every Run and repository, because the ChatGPT Quota belongs to your account ([ADR 0003](docs/adr/0003-cost-is-quota-concurrency-capped-astra-needs-permission.md)). A further Delegation waits for a slot; its waiting time is in its evidence and doesn't count towards its timeout. The slots are locks on files in `~/.cache/opus-orchestrator/slots/` (or under `$XDG_CACHE_HOME`), so a slot is released when its wrapper exits, even when it is killed.
 
