@@ -4,7 +4,7 @@ Test cases 1, 3 and 5 (`bug-fix`, `investigation`, `parallel-feature`) in the `s
 
 The verdict follows the same rule as the skill round: at least as many tasks passed as both baselines, and less Claude Quota than Opus alone.
 
-**Verdict: the round passes.** The second revision (commit `61f6ada`; the Gotcha this round added and two wording fixes from review came after the runs) passed all three tasks, as both baselines did, and used 45% fewer Claude tokens and 34% lower Claude cost than Opus alone. A first attempt with the first revision is recorded below; its `parallel-feature` run ran out of ChatGPT Quota and isn't counted, but it showed that the first revision hadn't closed gap 1. The round's wall time is the weak spot: `parallel-feature` took 1,740 s, ten minutes of it lost to a failure that is now a Gotcha.
+**Verdict: not established.** The second revision (commit `61f6ada`) passed all three tasks, as both baselines did, with 45% fewer Claude tokens and 34% lower Claude cost than Opus alone. But its account of the earlier failure named the test case's own failing case, and the Orchestrator passed that case on to the Delegate. A third run with the account worded generically (commit `ab4d071`) passed one task of three: `parallel-feature` failed on the same acceptance test as the skill round, and `bug-fix` failed on a fix that went beyond the prompt. So the second run's pass rests on the hint, and the revision doesn't reliably meet the rule. A first attempt with the first revision is recorded too; its `parallel-feature` run ran out of ChatGPT Quota and isn't counted.
 
 ## Setup
 
@@ -65,6 +65,23 @@ Claude Code stops a background Bash command when its timeout runs out, ten minut
 
 The wrapper was stopped with its command, so it wrote no Result, evidence or token usage for d1 and d2, and `report` lists them as "no evidence: still running, or the wrapper failed". That leaves a gap in the Run record, which is meant to hold every Delegation's token usage. The wrapper ought to record what it can when it is stopped. That is a wrapper change, not a Gotcha, and isn't part of this issue.
 
+## Third run: the example worded generically
+
+After the second run, the skill's account of the earlier failure was reworded without the test case's specifics: no widget, no Rest day, no `true`. The wrapper also gained the `stopped` failure kind, which keeps a stopped Delegation's diff so it can be resumed. The three tasks ran again on 2026-10-14 from 09:56 local time, as before, on commit `ab4d071`.
+
+| Task | Passed | Wall time | Claude turns | Claude tokens | Claude cost | Against `alone` | Delegations | Codex tokens |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| bug-fix | **no** | 108 s | 11 | 375K | $0.62 | +88% | none | — |
+| investigation | yes³ | 50 s | 5 | 197K | $0.40 | +16% | none | — |
+| parallel-feature | **no** | 1,289 s | 10 | 1,531K | $1.29 | −60% | 2 at once: gpt-6.1-sol medium, core and its tests, `done`, 490 s; gpt-6.1-sol xhigh, Android, `done`, 967 s | 3.71M in (3.51M cached), 32,946 out |
+
+Together: one of three passed, 2.10M Claude tokens (−66% against `alone`), $2.31 (−41%) and 1,446 s.
+
+- **`parallel-feature`: the rule was followed, and the case was missed anyway.** Opus wrote only the `onToggle` stub, gave the core change and its tests to one Delegation and Android to another, and gave both `delegate` calls a long Bash timeout, so nothing was stopped. But it ran the core Delegation at medium, and its task part listed the user's criteria without singling out a Rest day. The Delegate replaced the widget's setting with `true`, the same line as in both earlier failures, and its tests didn't tap a widget on a Rest day. The check failed on `WidgetBehaviorTest.testOnToggleRepetition_onRestDay`, as in the skill round. The two runs that got this case right had it at xhigh: `pointer`'s single Delegation, and the second run's core Delegation, whose task part also named the case.
+- **`bug-fix`: a fix wider than the prompt.** Opus made no Delegation. Besides failing the run when the locked version's tag is gone, it made the updater check the locked version's tags whenever it keeps them for a newer version not pushed yet. It rewrote two existing tests to record those requests. The prompt says "Only a newly planned version whose tag is missing is still skipped for the run", and the reference's tests don't record the extra requests, so three of them failed. Nothing in the skill speaks to how far a fix should go; the other three `skill` runs of this task made the narrow fix.
+
+What the three runs together show about gap 1: limiting what Opus writes before the Delegations works, since Opus wrote only a stub in both runs of the second wording. Keeping a change and its tests together is not enough on its own. The widget's Rest-day case is easy to miss in a mechanical replacement, and it was caught only at xhigh, or when the task part named it. Finding the case belongs to whoever writes the behaviour, so the next revision would have to say how hard that Delegation should think, or what the task part must point at, without naming this test case's answer.
+
 ## Gotchas added
 
 - A background `delegate` call needs a Bash timeout longer than the Delegation: the failure above, Delegations d1 and d2 of `parallel-feature`.
@@ -93,8 +110,8 @@ Defining an interface as a signature and its contract, and allowing the behaviou
 
 ## Limits
 
-- **The second revision names the failing case.** Its account of the earlier failure says a widget tap on a Rest day failed, and the core task part then asked for exactly that case. The pass shows the new rule working together with that hint, not the rule alone. A rerun with the account worded without the case would separate them.
-- One run per configuration and task. The two `bug-fix` runs with the same guidance cost +31% and +7% against `alone`.
+- **The second revision named the failing case.** The third run, worded without it, failed the same case, so the second run's pass came from the rule together with the hint.
+- One run per configuration and task. Four `skill` runs of `bug-fix` cost +29%, +31%, +7% and +88% against `alone`, and one of them failed, so a single run says little about the skill's cost on small tasks.
 - The `investigation` grades are Claude's, as in the earlier rounds.
 - Codex's tokens for `parallel-feature` leave out the two stopped Delegations, so they understate its ChatGPT Quota.
 - The baselines ran at the user's `medium` setting, and this round at `--effort medium`, as in the skill round.
